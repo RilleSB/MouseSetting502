@@ -176,7 +176,7 @@ fn main() {
                 }
             };
             println!("\n[*] Enabling breathing effect (#{})...", args[2]);
-            match set_led_effect(&g502, LedZone::Logo, LedEffect::Breathing { r, g, b, period_ms: 3000, brightness: 255 }) {
+            match set_led_effect(&g502, LedZone::Logo, LedEffect::Breathing { r, g, b, period_ms: 3000 }) {
                 Ok(_) => println!("[+] Breathing effect active!"),
                 Err(e) => eprintln!("[-] Failed to set effect: {e}"),
             }
