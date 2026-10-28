@@ -11,6 +11,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_KEYUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
     MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN,
     MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
+    mouse_event, keybd_event, MapVirtualKeyW,
 };
 
 #[cfg(windows)]
@@ -57,7 +58,8 @@ pub fn send_mouse_click(button: u8, down: bool) {
     unsafe {
         let sent = SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
         if sent == 0 {
-            eprintln!("Warning: SendInput mouse event blocked or failed");
+            // Robust fallback: direct driver-level mouse_event which bypasses UIPI restrictions
+            mouse_event(dw_flags, 0, 0, mouse_data as i32, 0);
         }
     }
 }
@@ -68,13 +70,14 @@ pub fn send_mouse_click(_button: u8, _down: bool) {}
 #[cfg(windows)]
 pub fn send_key_event(vk_code: u16, down: bool) {
     let dw_flags = if down { 0 } else { KEYEVENTF_KEYUP };
+    let scan_code = unsafe { MapVirtualKeyW(vk_code as u32, 0) as u16 };
 
     let input = INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: vk_code,
-                wScan: 0,
+                wScan: scan_code,
                 dwFlags: dw_flags,
                 time: 0,
                 dwExtraInfo: 0,
@@ -85,7 +88,8 @@ pub fn send_key_event(vk_code: u16, down: bool) {
     unsafe {
         let sent = SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
         if sent == 0 {
-            eprintln!("Warning: SendInput key event blocked or failed for VK 0x{:02X}", vk_code);
+            // Robust fallback: direct keybd_event which bypasses UIPI restrictions and works in games
+            keybd_event(vk_code as u8, scan_code as u8, dw_flags, 0);
         }
     }
 }

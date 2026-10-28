@@ -554,3 +554,162 @@ export component QuickDelayButton inherits Rectangle {
         clicked => { root.clicked(root.delay_ms); }
     }
 }
+
+export component ProfileRow inherits Rectangle {
+    in property <string> id: "";
+    in property <string> name: "";
+    in property <string> description: "";
+    in property <string> dpi_info: "";
+    in property <int> keybinds_count: 0;
+    in property <bool> is_active: false;
+    callback activate();
+    callback duplicate();
+    callback delete();
+
+    height: 72px;
+    border-radius: Theme.radius_base;
+    background: root.is_active ? Theme.accent_subtle : Theme.card_bg_subtle;
+    border-width: 1px;
+    border-color: root.is_active ? Theme.accent : Theme.border_subtle;
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: 14px;
+            alignment: start;
+
+            Rectangle {
+                width: 44px;
+                height: 44px;
+                border-radius: Theme.radius_md;
+                background: root.is_active ? Theme.accent : Theme.surface_elevated;
+                border-width: 1px;
+                border-color: root.is_active ? Theme.accent : Theme.border_btn;
+
+                Text {
+                    text: root.is_active ? "📁" : "📄";
+                    font-size: 20px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    Text {
+                        text: root.name;
+                        font-size: Theme.font_body;
+                        font-weight: 800;
+                        color: Theme.text_primary;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        height: 20px;
+                        border-radius: Theme.radius_xs;
+                        background: root.is_active ? Theme.success_bg : Theme.surface_alt;
+                        border-width: 1px;
+                        border-color: root.is_active ? Theme.success_border : Theme.border_subtle;
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px;
+                            alignment: center;
+                            Text {
+                                text: root.is_active ? "АКТИВЕН" : "СОХРАНЕН";
+                                font-size: Theme.font_xs;
+                                font-weight: 700;
+                                color: root.is_active ? Theme.success_dot : Theme.text_muted;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.description;
+                    font-size: Theme.font_caption;
+                    color: Theme.text_secondary;
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: "🎯 " + root.dpi_info;
+                        font-size: Theme.font_xs;
+                        font-weight: 600;
+                        color: Theme.accent;
+                    }
+                    Text {
+                        text: "⚡ Привязок: " + root.keybinds_count;
+                        font-size: Theme.font_xs;
+                        font-weight: 600;
+                        color: Theme.text_subtle;
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: center;
+
+            if !root.is_active : Rectangle {
+                height: 34px;
+                border-radius: Theme.radius_md;
+                background: Theme.accent;
+
+                HorizontalLayout {
+                    padding-left: 14px; padding-right: 14px;
+                    alignment: center;
+                    Text {
+                        text: "АКТИВИРОВАТЬ";
+                        font-size: Theme.font_caption;
+                        font-weight: 800;
+                        color: Theme.app_bg;
+                        vertical-alignment: center;
+                    }
+                }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.activate(); }
+                }
+            }
+
+            Rectangle {
+                width: 34px; height: 34px;
+                border-radius: Theme.radius_md;
+                background: Theme.surface_alt;
+                border-width: 1px;
+                border-color: Theme.border_btn;
+
+                Text { text: "📑"; font-size: Theme.font_caption; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.duplicate(); }
+                }
+            }
+
+            if !root.is_active : Rectangle {
+                width: 34px; height: 34px;
+                border-radius: Theme.radius_md;
+                background: Theme.error_btn_bg;
+                border-width: 1px;
+                border-color: Theme.error_border;
+
+                Text { text: "🗑️"; font-size: Theme.font_caption; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.delete(); }
+                }
+            }
+        }
+    }
+}

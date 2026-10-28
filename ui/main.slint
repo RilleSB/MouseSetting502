@@ -2,7 +2,7 @@
 import { Theme } from "theme.slint";
 import {
     Card, Pill, IconButton, SidebarItem, Modal,
-    MacroRow, StepRow, KeybindRow,
+    MacroRow, StepRow, KeybindRow, ProfileRow,
     SwatchButton, QuickKeyButton, QuickDelayButton
 } from "components.slint";
 
@@ -16,6 +16,16 @@ export struct SwatchItem {
     g: int,
     b: int,
     col: color,
+}
+
+
+export struct ProfileItem {
+    id: string,
+    name: string,
+    description: string,
+    dpi_info: string,
+    keybinds_count: int,
+    is_active: bool,
 }
 
 export struct QuickKeyItem {
@@ -54,6 +64,7 @@ export struct QuickKeyItem {
             { id: 2, title: "✨  Подсветка LIGHTSYNC" },
             { id: 3, title: "⚡  Студия макросов" },
             { id: 4, title: "🎛️  Назначение клавиш" },
+            { id: 5, title: "📁  Профили настроек" },
         ];
 
         in property <[SwatchItem]> swatches: [
@@ -116,6 +127,18 @@ export struct QuickKeyItem {
         in-out property <bool> show_bind_picker: false;
         in-out property <string> picker_button_id: "";
         in-out property <string> picker_button_name: "";
+
+        // Profile state
+        in-out property <string> active_profile_name: "Основной (Desktop)";
+        in-out property <[ProfileItem]> profile_items: [];
+        in-out property <bool> show_profile_creator: false;
+        in-out property <string> new_profile_name: "";
+        in-out property <string> new_profile_desc: "";
+
+        callback switch_profile(string);
+        callback create_profile(string, string);
+        callback duplicate_profile(string);
+        callback delete_profile(string);
 
         callback set_dpi(int);
         callback dpi_up();
@@ -242,6 +265,35 @@ export struct QuickKeyItem {
                             text_color: root.headset_connected ? Theme.accent : Theme.text_inactive;
                             bg_col: root.headset_connected ? Theme.headset_bg_connected : Theme.headset_bg_disconnected;
                             border_col: root.headset_connected ? Theme.accent : Theme.headset_border_disconnected;
+                        }
+
+                        // Profile pill
+                        Rectangle {
+                            height: 28px;
+                            border-radius: Theme.radius_md;
+                            background: Theme.surface_elevated;
+                            border-width: 1px;
+                            border-color: Theme.accent_border;
+
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px;
+                                spacing: 6px;
+                                alignment: center;
+
+                                Text { text: "📁"; font-size: 11px; vertical-alignment: center; }
+                                Text {
+                                    text: root.active_profile_name;
+                                    font-size: Theme.font_caption;
+                                    font-weight: 700;
+                                    color: Theme.accent;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.active_tab = 5; }
+                            }
                         }
 
                         // Refresh button
@@ -1100,6 +1152,80 @@ export struct QuickKeyItem {
                             }
                         }
                     }
+
+                        // ==========================================
+                        // TAB 5: PROFILES MANAGEMENT
+                        // ==========================================
+                        if root.active_tab == 5 : ScrollView {
+                        VerticalLayout {
+                            spacing: 16px;
+
+                            HorizontalLayout {
+                                alignment: space-between;
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text {
+                                        text: "Менеджер профилей настроек";
+                                        font-size: 20px;
+                                        font-weight: 800;
+                                        color: Theme.text_primary;
+                                    }
+                                    Text {
+                                        text: "Переключайте конфигурации мыши (DPI, пресеты сенсора, подсветку и макросы) под игры и задачи в 1 клик.";
+                                        font-size: 12px;
+                                        color: Theme.text_secondary;
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 10px;
+
+                                    Rectangle {
+                                        height: 38px;
+                                        border-radius: 6px;
+                                        background: Theme.accent;
+                                        HorizontalLayout {
+                                            padding-left: 14px; padding-right: 14px;
+                                            Text {
+                                                text: "➕ СОЗДАТЬ ПРОФИЛЬ";
+                                                font-size: 12px;
+                                                font-weight: 800;
+                                                color: Theme.app_bg;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.new_profile_name = "Новый игровой профиль";
+                                                root.new_profile_desc = "Кастомный профиль с индивидуальными DPI и макросами";
+                                                root.show_profile_creator = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Profiles List
+                            VerticalLayout {
+                                spacing: 8px;
+
+                                for item in root.profile_items : ProfileRow {
+                                    id: item.id;
+                                    name: item.name;
+                                    description: item.description;
+                                    dpi_info: item.dpi_info;
+                                    keybinds_count: item.keybinds_count;
+                                    is_active: item.is_active;
+                                    activate => { root.switch_profile(item.id); }
+                                    duplicate => { root.duplicate_profile(item.id); }
+                                    delete => { root.delete_profile(item.id); }
+                                }
+                            }
+                        }
+                        }
+
                 }
             }
             } // Close HorizontalLayout (Main Body: Sidebar + Content Canvas)
@@ -1545,4 +1671,98 @@ export struct QuickKeyItem {
         }
             }
             }
-    }
+    
+        // ==========================================
+        // MODAL OVERLAY: PROFILE CREATOR
+        // ==========================================
+        if root.show_profile_creator : Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Theme.overlay;
+
+            TouchArea { /* block clicks outside */ }
+
+            HorizontalLayout {
+                alignment: center;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 500px;
+                        height: 290px;
+                        border-radius: 12px;
+                        background: Theme.card_bg_subtle;
+                        border-width: 1px;
+                        border-color: Theme.border_default;
+
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 16px;
+
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "Создать новый профиль";
+                                    font-size: 16px;
+                                    font-weight: 800;
+                                    color: Theme.text_primary;
+                                }
+                                Rectangle {
+                                    width: 28px; height: 28px; border-radius: 6px; background: Theme.surface_elevated;
+                                    Text { text: "✕"; font-size: 12px; font-weight: 800; color: Theme.text_primary; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.show_profile_creator = false; }
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text { text: "Название профиля:"; font-size: 11px; font-weight: 700; color: Theme.text_white_dim; }
+                                LineEdit {
+                                    text: root.new_profile_name;
+                                    edited(val) => { root.new_profile_name = val; }
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text { text: "Описание (игры / назначение):"; font-size: 11px; font-weight: 700; color: Theme.text_white_dim; }
+                                LineEdit {
+                                    text: root.new_profile_desc;
+                                    edited(val) => { root.new_profile_desc = val; }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                alignment: end;
+                                spacing: 10px;
+
+                                Rectangle {
+                                    height: 36px; border-radius: 6px; background: Theme.surface_elevated;
+                                    HorizontalLayout { padding-left: 14px; padding-right: 14px; Text { text: "Отмена"; font-size: 12px; font-weight: 700; color: Theme.text_secondary; vertical-alignment: center; } }
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.show_profile_creator = false; }
+                                    }
+                                }
+
+                                Rectangle {
+                                    height: 36px; border-radius: 6px; background: Theme.accent;
+                                    HorizontalLayout { padding-left: 16px; padding-right: 16px; Text { text: "СОЗДАТЬ"; font-size: 12px; font-weight: 800; color: Theme.app_bg; vertical-alignment: center; } }
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.create_profile(root.new_profile_name, root.new_profile_desc);
+                                            root.show_profile_creator = false;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+}

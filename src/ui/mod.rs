@@ -3,21 +3,24 @@ pub mod models;
 pub mod device_worker;
 pub mod macro_controller;
 pub mod keybind_controller;
+pub mod profile_controller;
 
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
-use bridge::{MainWindow, MacroItem, KeybindItem};
-use models::{update_ui_macro_list, update_ui_keybind_list};
+use bridge::{MainWindow, MacroItem, KeybindItem, ProfileItem};
+use models::{update_ui_macro_list, update_ui_keybind_list, update_ui_profile_list};
 use device_worker::init_device_worker;
 use macro_controller::{setup_macro_controller, setup_macro_triggers, MacroControllerContext};
 use keybind_controller::setup_keybind_controller;
+use profile_controller::{setup_profile_controller, ProfileControllerContext};
 
 use crate::lghub::{
     LgHubSettings, custom_macros::load_custom_macros,
     keybinds::{KeybindListener, load_bindings},
     dpi_presets::load_dpi_presets,
+    profiles::{load_profiles, get_active_profile_id, get_active_profile},
     macro_engine,
 };
 
@@ -40,6 +43,9 @@ pub fn run() {
     let builder_steps_model = Rc::new(VecModel::<slint::SharedString>::default());
     app.set_builder_steps(ModelRc::from(builder_steps_model.clone()));
 
+    let profile_model = Rc::new(VecModel::<ProfileItem>::default());
+    app.set_profile_items(ModelRc::from(profile_model.clone()));
+
     let initial_dpi_presets = load_dpi_presets();
     let dpi_presets_model = Rc::new(VecModel::<i32>::from(
         initial_dpi_presets.iter().map(|&x| x as i32).collect::<Vec<_>>()
@@ -52,17 +58,22 @@ pub fn run() {
     let custom_macros = Arc::new(Mutex::new(load_custom_macros()));
     let keybinds = Arc::new(Mutex::new(load_bindings()));
 
+    let initial_profiles = load_profiles();
+    let active_id = get_active_profile_id();
+    let active_prof = get_active_profile(&initial_profiles);
+    app.set_active_profile_name(active_prof.name.into());
+    let profiles = Arc::new(Mutex::new(initial_profiles));
+
     // 3. Populate initial models
     update_ui_macro_list(&macro_model, &lghub_settings, &custom_macros);
     update_ui_keybind_list(&keybind_model, &keybinds);
+    if let Ok(profs) = profiles.lock() {
+        update_ui_profile_list(&profile_model, &profs, &active_id);
+    }
 
     // 4. Macro execution & background listener state
     let active_macro: Arc<Mutex<Option<(String, macro_engine::ActiveMacro)>>> = Arc::new(Mutex::new(None));
-    let initial_binds = if let Ok(guard) = keybinds.lock() {
-        guard.clone()
-    } else {
-        Vec::new()
-    };
+    let initial_binds = keybinds.lock().map(|g| g.clone()).unwrap_or_default();
     let listener = Arc::new(KeybindListener::new(initial_binds));
 
     // 5. Wire background trigger callback and Esc emergency panic stop
@@ -86,6 +97,16 @@ pub fn run() {
         listener: &listener,
     });
     setup_keybind_controller(&app, &keybind_model, &keybinds, &listener);
+    setup_profile_controller(&ProfileControllerContext {
+        app: &app,
+        profile_model: &profile_model,
+        dpi_presets_model: &dpi_presets_model,
+        keybind_model: &keybind_model,
+        profiles: &profiles,
+        dpi_presets: &dpi_presets,
+        keybinds: &keybinds,
+        listener: &listener,
+    });
 
     // 8. Run Slint application loop
     if let Err(e) = app.run() {

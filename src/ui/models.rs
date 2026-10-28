@@ -2,8 +2,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use slint::VecModel;
 
-use super::bridge::{MacroItem, KeybindItem};
-use crate::lghub::{LgHubSettings, LgMacro, ButtonBinding};
+use super::bridge::{MacroItem, KeybindItem, ProfileItem};
+use crate::lghub::{LgHubSettings, LgMacro, ButtonBinding, AppProfile};
 
 pub fn update_ui_macro_list(
     macro_model: &Rc<VecModel<MacroItem>>,
@@ -65,4 +65,25 @@ pub fn update_ui_keybind_list(
         }
     }
     keybind_model.set_vec(items);
+}
+
+pub fn update_ui_profile_list(
+    profile_model: &Rc<VecModel<ProfileItem>>,
+    profiles: &[AppProfile],
+    active_id: &str,
+) {
+    let mut items = Vec::new();
+    for p in profiles {
+        let presets_str = p.dpi_presets.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(" / ");
+        let active_keybinds = p.keybinds.iter().filter(|b| !b.assigned_macro.trim().is_empty()).count();
+        items.push(ProfileItem {
+            id: p.id.clone().into(),
+            name: p.name.clone().into(),
+            description: p.description.clone().into(),
+            dpi_info: format!("{} DPI (Пресеты: {})", p.current_dpi, presets_str).into(),
+            keybinds_count: active_keybinds as i32,
+            is_active: p.id == active_id,
+        });
+    }
+    profile_model.set_vec(items);
 }
