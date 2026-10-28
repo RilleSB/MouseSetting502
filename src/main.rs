@@ -1,12 +1,16 @@
 pub mod hidpp;
+pub mod lghub;
 
 use std::env;
+use std::thread;
+use std::time::Duration;
 use hidapi::HidApi;
 use hidpp::HidppDevice;
 use hidpp::features::{
     get_device_name, get_current_dpi, set_dpi, get_dpi_range,
     set_led_effect, LedZone, LedEffect,
 };
+use lghub::{LgHubSettings, macro_engine};
 
 const LOGITECH_VID: u16 = 0x046D;
 const G502_PID: u16 = 0xC08B;
@@ -48,15 +52,94 @@ fn print_help() {
     println!("\nUsage:");
     println!("  ghub_rust                       Display current mouse status");
     println!("  ghub_rust --dpi <value>         Set active DPI (e.g. --dpi 800)");
-    println!("  ghub_rust --color <HEX>         Set static RGB color (e.g. --color FF0055)");
+    println!("  ghub_rust --color <HEX>         Set static RGB color (e.g. --color 00FFCC)");
     println!("  ghub_rust --cycle               Enable spectrum rainbow color cycle");
     println!("  ghub_rust --breathe <HEX>       Enable breathing effect with color");
     println!("  ghub_rust --off                 Turn off RGB lighting");
     println!("  ghub_rust --scan                Scan all Logitech devices & endpoints");
+    println!("  ghub_rust --macros              List all profiles and macros from G HUB database");
+    println!("  ghub_rust --run-macro <name>    Test play a macro from G HUB (e.g. --run-macro lkm)");
 }
 
 fn main() {
     print_banner();
+
+    let args: Vec<String> = env::args().collect();
+
+    // 1. G HUB Macro Inspection command
+    if args.len() > 1 && (args[1] == "--macros" || args[1] == "-m") {
+        println!("\n[+] Reading original G HUB settings database...");
+        match LgHubSettings::load_from_db() {
+            Ok(settings) => {
+                println!("Loaded {} cards and {} profiles from G HUB.", settings.cards.len(), settings.profiles.len());
+
+                println!("\n--- Custom & Recorded Macros ---");
+                let mut macro_count = 0;
+                for card in &settings.cards {
+                    if let Some(m) = &card.macro_data {
+                        macro_count += 1;
+                        let toggle_str = if m.is_toggle { " (Toggle / Auto-clicker)" } else { "" };
+                        println!("  #{} '{}' -> Type: {}{}", macro_count, m.name, m.macro_type, toggle_str);
+                        if let Some(action) = &m.action_name {
+                            println!("       Action: {}", action);
+                        }
+                        println!("       Sequence length: {} steps", m.sequence.len());
+                    }
+                }
+
+                println!("\n--- G502 HERO Active Profiles & Bindings ---");
+                for prof in &settings.profiles {
+                    let g502_binds: Vec<_> = prof.assignments.iter().filter(|a| a.slot_id.contains("g502")).collect();
+                    if !g502_binds.is_empty() {
+                        println!("\nProfile: '{}':", prof.name);
+                        for b in g502_binds {
+                            let card_name = settings.find_card(&b.card_id)
+                                .and_then(|c| c.name.clone())
+                                .unwrap_or_else(|| b.card_id.clone());
+                            println!("  Button {:<24} -> {}", b.slot_id, card_name);
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("[-] Failed to load G HUB database: {e}"),
+        }
+        return;
+    }
+
+    // 2. Run Macro command
+    if args.len() > 2 && args[1] == "--run-macro" {
+        let macro_name = &args[2];
+        println!("\n[*] Looking for macro '{}' in G HUB database...", macro_name);
+        match LgHubSettings::load_from_db() {
+            Ok(settings) => {
+                let target_card = settings.cards.iter().find(|c| {
+                    c.name.as_deref().unwrap_or("") == macro_name
+                        || c.macro_data.as_ref().map(|m| m.name.as_str()).unwrap_or("") == macro_name
+                });
+
+                if let Some(card) = target_card {
+                    if let Some(m) = &card.macro_data {
+                        println!("[+] Found macro '{}' (Toggle: {})! Running for 3 seconds...", m.name, m.is_toggle);
+                        if m.is_toggle {
+                            let active = macro_engine::start_macro_loop(m.clone());
+                            thread::sleep(Duration::from_secs(3));
+                            active.stop();
+                            println!("[+] Finished test execution.");
+                        } else {
+                            macro_engine::play_macro_once(m);
+                            println!("[+] Executed macro sequence once.");
+                        }
+                    } else {
+                        eprintln!("[-] Card '{}' has no macro sequence payload.", macro_name);
+                    }
+                } else {
+                    eprintln!("[-] Macro '{}' not found in G HUB database.", macro_name);
+                }
+            }
+            Err(e) => eprintln!("[-] Database error: {e}"),
+        }
+        return;
+    }
 
     let api = match HidApi::new() {
         Ok(api) => api,
@@ -65,8 +148,6 @@ fn main() {
             return;
         }
     };
-
-    let args: Vec<String> = env::args().collect();
 
     if args.len() > 1 && args[1] == "--scan" {
         println!("\n[+] Scanning Logitech Peripherals:");
