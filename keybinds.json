@@ -28,7 +28,7 @@
     "button_label": "G4 • Боковая назад",
     "default_action": "Назад (Браузер)",
     "vk_code": 5,
-    "assigned_macro": "⚡ Быстрый клик ЛКМ (Toggle)",
+    "assigned_macro": "",
     "is_mouse_button": true
   },
   {
@@ -36,7 +36,7 @@
     "button_label": "G5 • Боковая вперед",
     "default_action": "Вперед (Браузер)",
     "vk_code": 6,
-    "assigned_macro": "🎯 Тройной выстрел (Burst 3x)",
+    "assigned_macro": "",
     "is_mouse_button": true
   },
   {

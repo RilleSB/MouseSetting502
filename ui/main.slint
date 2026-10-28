@@ -246,7 +246,6 @@ export struct QuickKeyItem {
                     }
                 }
             }
-                        }
 
             // Divider
             Rectangle {
@@ -259,6 +258,7 @@ export struct QuickKeyItem {
             // ==========================================
             HorizontalLayout {
                 spacing: 0px;
+                vertical-stretch: 1;
 
                 // --- Modern Sidebar Navigation ---
                 Rectangle {
@@ -335,6 +335,7 @@ export struct QuickKeyItem {
 
                 // --- Content Canvas ---
                 Rectangle {
+                    horizontal-stretch: 1;
                     background: Theme.app_bg;
 
                     VerticalLayout {
@@ -931,6 +932,7 @@ export struct QuickKeyItem {
                     }
                 }
             }
+            } // Close HorizontalLayout (Main Body: Sidebar + Content Canvas)
 
             // Divider
             Rectangle {
@@ -967,7 +969,7 @@ export struct QuickKeyItem {
                     }
                 }
             }
-        }
+        } // Close root VerticalLayout (Header + Main Body + Footer)
 
         // ==========================================
         // MODAL OVERLAY: MACRO CREATOR & EDITOR
