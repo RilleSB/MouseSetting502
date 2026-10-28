@@ -61,7 +61,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
         },
         ButtonBinding {
             button_id: "G4".into(),
-            button_label: "G4 • Боковая назад".into(),
+            button_label: "G4 • Боковая назад (Макросы)".into(),
             default_action: "Назад (Браузер)".into(),
             vk_code: 0x05, // VK_XBUTTON1
             assigned_macro: "".into(),
@@ -69,7 +69,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
         },
         ButtonBinding {
             button_id: "G5".into(),
-            button_label: "G5 • Боковая вперед".into(),
+            button_label: "G5 • Боковая вперед (Макросы)".into(),
             default_action: "Вперед (Браузер)".into(),
             vk_code: 0x06, // VK_XBUTTON2
             assigned_macro: "".into(),
@@ -77,39 +77,39 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
         },
         ButtonBinding {
             button_id: "G6".into(),
-            button_label: "G6 • Снайпер (DPI Shift)".into(),
-            default_action: "Прицеливание (DPI Shift)".into(),
+            button_label: "G6 • Снайпер / DPI Shift [Аппаратная]".into(),
+            default_action: "Прицеливание (DPI Shift в памяти G502)".into(),
             vk_code: 0x7C, // VK_F13
             assigned_macro: "".into(),
             is_mouse_button: true,
         },
         ButtonBinding {
             button_id: "G7".into(),
-            button_label: "G7 • DPI Вниз".into(),
-            default_action: "Уменьшить DPI".into(),
+            button_label: "G7 • DPI Вниз [Аппаратная смена]".into(),
+            default_action: "Уменьшить DPI (Память мыши)".into(),
             vk_code: 0x7D, // VK_F14
             assigned_macro: "__DPI_DOWN__".into(),
             is_mouse_button: true,
         },
         ButtonBinding {
             button_id: "G8".into(),
-            button_label: "G8 • DPI Вверх".into(),
-            default_action: "Увеличить DPI".into(),
+            button_label: "G8 • DPI Вверх [Аппаратная смена]".into(),
+            default_action: "Увеличить DPI (Память мыши)".into(),
             vk_code: 0x7E, // VK_F15
             assigned_macro: "__DPI_UP__".into(),
             is_mouse_button: true,
         },
         ButtonBinding {
             button_id: "G9".into(),
-            button_label: "G9 • Смена профиля".into(),
-            default_action: "Цикл профилей G502".into(),
+            button_label: "G9 • Смена профиля [Аппаратная смена]".into(),
+            default_action: "Цикл профилей в памяти G502".into(),
             vk_code: 0x7F, // VK_F16
             assigned_macro: "".into(),
             is_mouse_button: true,
         },
         ButtonBinding {
             button_id: "G10".into(),
-            button_label: "G10 • Наклон колеса влево".into(),
+            button_label: "G10 • Наклон колеса влево (Макросы)".into(),
             default_action: "Прокрутка влево".into(),
             vk_code: 0, // Intercepted via WM_MOUSEHWHEEL delta < 0
             assigned_macro: "".into(),
@@ -117,7 +117,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
         },
         ButtonBinding {
             button_id: "G11".into(),
-            button_label: "G11 • Наклон колеса вправо".into(),
+            button_label: "G11 • Наклон колеса вправо (Макросы)".into(),
             default_action: "Прокрутка вправо".into(),
             vk_code: 0, // Intercepted via WM_MOUSEHWHEEL delta > 0
             assigned_macro: "".into(),

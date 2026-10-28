@@ -63,9 +63,11 @@ pub fn setup_macro_triggers(
             }
         }
 
+        println!("[*] Keybind Trigger: button dispatched macro '{}'", macro_name);
+
         let target_macro = {
             let found = if let Ok(custom) = custom_ref.lock() {
-                custom.iter().find(|m| m.name == macro_name).cloned()
+                custom.iter().find(|m| m.name == macro_name || m.name.trim() == macro_name.trim()).cloned()
             } else {
                 None
             };
@@ -74,6 +76,8 @@ pub fn setup_macro_triggers(
                     data.cards.iter().find_map(|c| {
                         if c.name.as_deref() == Some(&macro_name)
                             || c.macro_data.as_ref().map(|m| m.name.as_str()) == Some(&macro_name)
+                            || c.name.as_deref().map(|s| s.trim()) == Some(macro_name.trim())
+                            || c.macro_data.as_ref().map(|m| m.name.trim()) == Some(macro_name.trim())
                         {
                             c.macro_data.clone()
                         } else {
@@ -87,6 +91,7 @@ pub fn setup_macro_triggers(
         };
 
         if let Some(m) = target_macro {
+            println!("[+] Running macro '{}' (steps: {}, toggle: {})", m.name, m.sequence.len(), m.is_toggle);
             if m.is_toggle {
                 let active = macro_engine::start_macro_loop(m);
                 *slot = Some((macro_name.clone(), active));
@@ -110,6 +115,15 @@ pub fn setup_macro_triggers(
                     });
                 });
             }
+        } else {
+            eprintln!("[-] Warning: macro '{}' not found in custom macros or G HUB cards", macro_name);
+            let weak = app_weak.clone();
+            let m_name = macro_name.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.set_status_msg(format!("Ошибка: макрос '{}' не найден", m_name).into());
+                }
+            });
         }
     });
 

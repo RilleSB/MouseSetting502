@@ -25,10 +25,14 @@ pub fn update_ui_macro_list(
         }
     }
 
-    // 2. G HUB imported macros
+    // 2. G HUB imported macros (only valid macros with recorded steps)
     if let Some(ref data) = **lghub_settings {
         for card in &data.cards {
             if let Some(m) = &card.macro_data
+                && !m.sequence.is_empty()
+                && !m.name.trim().is_empty()
+                && m.name != "Unnamed"
+                && !m.name.starts_with("APPLET_")
                 && !items.iter().any(|item| item.name.as_str() == m.name.as_str()) {
                     items.push(MacroItem {
                         name: m.name.clone().into(),

@@ -59,15 +59,33 @@ pub fn setup_keybind_controller(
     let listener_ref = listener.clone();
     let keybind_model_ref = keybind_model.clone();
     app.on_assign_keybind(move |btn_id, macro_name| {
-        if let Ok(mut binds) = keybinds_arc.lock() {
-            assign_button_macro(&mut binds, btn_id.as_str(), macro_name.as_str());
+        let btn_str = btn_id.as_str().trim();
+        let macro_str = macro_name.as_str().trim();
+        if btn_str.is_empty() {
+            eprintln!("[-] Warning: assign_keybind called with empty button_id");
+            return;
+        }
+
+        let assigned = if let Ok(mut binds) = keybinds_arc.lock() {
+            let res = assign_button_macro(&mut binds, btn_str, macro_str);
             let _ = save_bindings(&binds);
             listener_ref.update_bindings(binds.clone());
-        }
+            res
+        } else {
+            false
+        };
+
         update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
+
         if let Some(app) = app_weak.upgrade() {
             app.set_show_bind_picker(false);
-            app.set_status_msg(format!("Кнопка {} привязана к макросу '{}'", btn_id, macro_name).into());
+            if assigned {
+                println!("[+] Keybind assigned: button '{}' -> macro '{}'", btn_str, macro_str);
+                app.set_status_msg(format!("Кнопка {} привязана к макросу '{}'", btn_str, macro_str).into());
+            } else {
+                eprintln!("[-] Warning: button '{}' not found in keybindings list", btn_str);
+                app.set_status_msg(format!("Ошибка: кнопка {} не найдена", btn_str).into());
+            }
         }
     });
 
@@ -77,15 +95,17 @@ pub fn setup_keybind_controller(
     let listener_ref = listener.clone();
     let keybind_model_ref = keybind_model.clone();
     app.on_clear_keybind(move |btn_id| {
+        let btn_str = btn_id.as_str().trim();
         if let Ok(mut binds) = keybinds_arc.lock() {
-            clear_button_macro(&mut binds, btn_id.as_str());
+            clear_button_macro(&mut binds, btn_str);
             let _ = save_bindings(&binds);
             listener_ref.update_bindings(binds.clone());
         }
         update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
         if let Some(app) = app_weak.upgrade() {
             app.set_show_bind_picker(false);
-            app.set_status_msg(format!("Назначение кнопки {} сброшено на стандартное", btn_id).into());
+            println!("[*] Keybind cleared for button '{}'", btn_str);
+            app.set_status_msg(format!("Назначение кнопки {} сброшено на стандартное", btn_str).into());
         }
     });
 }

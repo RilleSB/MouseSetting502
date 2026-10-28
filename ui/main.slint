@@ -1038,7 +1038,7 @@ export struct QuickKeyItem {
                                             color: Theme.text_primary;
                                         }
                                         Text {
-                                            text: "Слушает физические нажатия кнопок G502 (G1..G11, Tilt Wheel) и клавиш F6..F12 без задержки (0% CPU).";
+                                            text: "Для макросов: боковые G4/G5, наклоны колеса G10/G11, СКМ G3, клавиши F6..F12. Кнопки G7/G8 меняют DPI в памяти.";
                                             font-size: 11px;
                                             color: Theme.text_secondary;
                                         }
@@ -1088,7 +1088,12 @@ export struct QuickKeyItem {
                                         default_action: item.default_action;
                                         assigned_macro: item.assigned_macro;
                                         is_mouse: item.is_mouse;
-                                        assign => { root.open_keybind_picker(item.button_id, item.button_label); }
+                                        assign => {
+                                            root.picker_button_id = item.button_id;
+                                            root.picker_button_name = item.button_label;
+                                            root.show_bind_picker = true;
+                                            root.open_keybind_picker(item.button_id, item.button_label);
+                                        }
                                         clear => { root.clear_keybind(item.button_id); }
                                     }
                                 }
@@ -1362,7 +1367,7 @@ export struct QuickKeyItem {
                     alignment: center;
                     Rectangle {
                         width: 540px;
-                        height: 500px;
+                        height: 580px;
                         border-radius: 12px;
                         background: Theme.card_bg_subtle;
                         border-width: 1px;
@@ -1393,7 +1398,13 @@ export struct QuickKeyItem {
                         Rectangle {
                             width: 28px; height: 28px; border-radius: 6px; background: Theme.surface_elevated;
                             Text { text: "✕"; font-size: 12px; font-weight: 800; color: Theme.text_primary; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { root.close_keybind_picker(); } }
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.show_bind_picker = false;
+                                    root.close_keybind_picker();
+                                }
+                            }
                         }
                     }
 
@@ -1415,7 +1426,11 @@ export struct QuickKeyItem {
                             }
                         }
                         TouchArea {
-                            clicked => { root.clear_keybind(root.picker_button_id); }
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.clear_keybind(root.picker_button_id);
+                                root.show_bind_picker = false;
+                            }
                         }
                     }
 
@@ -1444,7 +1459,11 @@ export struct QuickKeyItem {
                                 Text { text: "DPI ВНИЗ (Пресет)"; font-size: Theme.font_caption; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; }
                             }
                             TouchArea {
-                                clicked => { root.assign_keybind(root.picker_button_id, "__DPI_DOWN__"); }
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.assign_keybind(root.picker_button_id, "__DPI_DOWN__");
+                                    root.show_bind_picker = false;
+                                }
                             }
                         }
 
@@ -1463,7 +1482,11 @@ export struct QuickKeyItem {
                                 Text { text: "▶"; font-size: Theme.font_caption; color: Theme.accent; vertical-alignment: center; }
                             }
                             TouchArea {
-                                clicked => { root.assign_keybind(root.picker_button_id, "__DPI_UP__"); }
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.assign_keybind(root.picker_button_id, "__DPI_UP__");
+                                    root.show_bind_picker = false;
+                                }
                             }
                         }
                     }
@@ -1484,9 +1507,9 @@ export struct QuickKeyItem {
                             for m in root.macro_items : Rectangle {
                                 height: 44px;
                                 border-radius: 6px;
-                                background: Theme.surface;
+                                background: row-touch.has-hover ? Theme.surface_elevated : Theme.surface;
                                 border-width: 1px;
-                                border-color: Theme.border_card;
+                                border-color: row-touch.has-hover ? Theme.accent : Theme.border_card;
 
                                 HorizontalLayout {
                                     padding-left: 14px;
@@ -1507,8 +1530,12 @@ export struct QuickKeyItem {
                                         }
                                     }
                                 }
-                                TouchArea {
-                                    clicked => { root.assign_keybind(root.picker_button_id, m.name); }
+                                row-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.assign_keybind(root.picker_button_id, m.name);
+                                        root.show_bind_picker = false;
+                                    }
                                 }
                             }
                         }
