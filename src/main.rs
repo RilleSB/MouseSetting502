@@ -1,5 +1,6 @@
 pub mod hidpp;
 pub mod lghub;
+pub mod ui;
 
 use std::env;
 use std::thread;
@@ -50,7 +51,8 @@ fn print_banner() {
 
 fn print_help() {
     println!("\nUsage:");
-    println!("  ghub_rust                       Display current mouse status");
+    println!("  ghub_rust                       Launch Desktop GUI");
+    println!("  ghub_rust --cli                 Display mouse status in CLI");
     println!("  ghub_rust --dpi <value>         Set active DPI (e.g. --dpi 800)");
     println!("  ghub_rust --color <HEX>         Set static RGB color (e.g. --color 00FFCC)");
     println!("  ghub_rust --cycle               Enable spectrum rainbow color cycle");
@@ -62,11 +64,17 @@ fn print_help() {
 }
 
 fn main() {
-    print_banner();
-
     let args: Vec<String> = env::args().collect();
 
-    // 1. G HUB Macro Inspection command
+    // Default: Launch GUI!
+    if args.len() == 1 || (args.len() > 1 && args[1] == "--gui") {
+        ui::run();
+        return;
+    }
+
+    print_banner();
+
+    // G HUB Macro Inspection command
     if args.len() > 1 && (args[1] == "--macros" || args[1] == "-m") {
         println!("\n[+] Reading original G HUB settings database...");
         match LgHubSettings::load_from_db() {
@@ -106,7 +114,7 @@ fn main() {
         return;
     }
 
-    // 2. Run Macro command
+    // Run Macro command
     if args.len() > 2 && args[1] == "--run-macro" {
         let macro_name = &args[2];
         println!("\n[*] Looking for macro '{}' in G HUB database...", macro_name);
@@ -179,20 +187,16 @@ fn main() {
 
     let device_name = get_device_name(&g502).unwrap_or_else(|_| "Logitech G502".into());
 
-    if args.len() == 1 {
-        // Default: Show status
+    if args[1] == "--cli" {
         println!("\nDevice: {}", device_name);
-
         match get_current_dpi(&g502, 0) {
             Ok(dpi) => println!("Current DPI       : {}", dpi),
             Err(e) => eprintln!("DPI read error    : {e}"),
         }
-
         match get_dpi_range(&g502, 0) {
             Ok(r) => println!("Supported DPI     : {} - {} (step: {})", r.min_dpi, r.max_dpi, r.step),
             Err(e) => eprintln!("Range query error : {e}"),
         }
-
         print_help();
         return;
     }
