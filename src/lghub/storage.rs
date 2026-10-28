@@ -17,11 +17,10 @@ pub fn get_appdata_dir() -> PathBuf {
 pub fn get_storage_path(filename: &str) -> PathBuf {
     let target = get_appdata_dir().join(filename);
     let local = PathBuf::from(filename);
-    if !target.exists() && local.exists() {
-        if let Ok(content) = fs::read_to_string(&local) {
+    if !target.exists() && local.exists()
+        && let Ok(content) = fs::read_to_string(&local) {
             let _ = fs::write(&target, content);
         }
-    }
     target
 }
 

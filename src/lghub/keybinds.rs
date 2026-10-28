@@ -550,11 +550,10 @@ impl KeybindListener {
             // Single dedicated worker thread for emergency panic stop (Item 12)
             thread::spawn(move || {
                 while let Ok(()) = panic_rx.recv() {
-                    if let Ok(guard) = panic_cb_arc.read() {
-                        if let Some(cb) = guard.as_ref() {
+                    if let Ok(guard) = panic_cb_arc.read()
+                        && let Some(cb) = guard.as_ref() {
                             cb();
                         }
-                    }
                 }
             });
 

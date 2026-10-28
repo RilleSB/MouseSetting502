@@ -8,7 +8,7 @@ hidapi = "2.6.7"
 rusqlite = { version = "0.41.0", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-slint = { version = "1.18.1", features = ["backend-default", "renderer-femtovg", "system-tray"] }
+slint = { version = "1.18.1", features = ["backend-default", "renderer-femtovg"] }
 
 [build-dependencies]
 slint-build = "1.18"
