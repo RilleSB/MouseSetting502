@@ -20,7 +20,7 @@ use crate::lghub::{
     LgHubSettings, custom_macros::load_custom_macros,
     keybinds::{KeybindListener, load_bindings},
     dpi_presets::load_dpi_presets,
-    profiles::{load_profiles, get_active_profile_id, get_active_profile},
+    profiles::{load_profiles, get_active_profile_id, get_active_profile, get_g9_lock},
     macro_engine,
 };
 
@@ -63,6 +63,7 @@ pub fn run() {
     let active_prof = get_active_profile(&initial_profiles);
     app.set_active_profile_name(active_prof.name.into());
     let profiles = Arc::new(Mutex::new(initial_profiles));
+    let g9_locked = Arc::new(std::sync::atomic::AtomicBool::new(get_g9_lock()));
 
     // 3. Populate initial models
     update_ui_macro_list(&macro_model, &lghub_settings, &custom_macros);
@@ -84,7 +85,7 @@ pub fn run() {
     app.set_listener_active(true);
 
     // 7. Initialize modular controllers
-    init_device_worker(&app, &dpi_presets_model, &dpi_presets);
+    init_device_worker(&app, &dpi_presets_model, &dpi_presets, &profiles, &g9_locked);
     setup_macro_controller(&MacroControllerContext {
         app: &app,
         macro_model: &macro_model,

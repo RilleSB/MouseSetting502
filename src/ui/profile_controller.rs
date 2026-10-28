@@ -74,10 +74,10 @@ pub fn setup_profile_controller(ctx: &ProfileControllerContext) {
                 update_ui_profile_list(&prof_model_ref, &profs, &p.id);
             }
 
-            // 4. Update Window UI
+            // 4. Update Window UI & Device DPI
             if let Some(app) = app_weak.upgrade() {
                 app.set_active_profile_name(p.name.clone().into());
-                app.set_current_dpi(p.current_dpi as i32);
+                app.invoke_set_dpi(p.current_dpi as i32);
                 app.set_status_msg(format!("Активирован профиль: '{}'", p.name).into());
                 println!("[+] Profile activated: '{}' (ID: {})", p.name, p.id);
             }

@@ -134,6 +134,11 @@ export struct QuickKeyItem {
         in-out property <bool> show_profile_creator: false;
         in-out property <string> new_profile_name: "";
         in-out property <string> new_profile_desc: "";
+        in-out property <bool> g9_locked: true;
+        in-out property <int> active_onboard_slot: 1;
+
+        callback toggle_g9_lock();
+        callback sync_all_onboard_memory();
 
         callback switch_profile(string);
         callback create_profile(string, string);
@@ -1141,10 +1146,14 @@ export struct QuickKeyItem {
                                         assigned_macro: item.assigned_macro;
                                         is_mouse: item.is_mouse;
                                         assign => {
-                                            root.picker_button_id = item.button_id;
-                                            root.picker_button_name = item.button_label;
-                                            root.show_bind_picker = true;
-                                            root.open_keybind_picker(item.button_id, item.button_label);
+                                            if item.button_id == "G9" {
+                                                root.active_tab = 5;
+                                            } else {
+                                                root.picker_button_id = item.button_id;
+                                                root.picker_button_name = item.button_label;
+                                                root.show_bind_picker = true;
+                                                root.open_keybind_picker(item.button_id, item.button_label);
+                                            }
                                         }
                                         clear => { root.clear_keybind(item.button_id); }
                                     }
@@ -1205,6 +1214,131 @@ export struct QuickKeyItem {
                                         }
                                     }
                                 }
+                            }
+
+                            // Hardware Onboard Memory & G9 Button Control Card
+                            Rectangle {
+                                border-radius: 10px;
+                                background: Theme.card_bg_subtle;
+                                border-width: 1px;
+                                border-color: root.g9_locked ? Theme.warning : Theme.accent_border;
+
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 12px;
+
+                                    HorizontalLayout {
+                                        alignment: space-between;
+
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            alignment: start;
+
+                                            Rectangle {
+                                                width: 44px;
+                                                height: 36px;
+                                                border-radius: Theme.radius_md;
+                                                background: root.g9_locked ? Theme.warning_subtle : Theme.accent_light;
+                                                border-width: 1px;
+                                                border-color: root.g9_locked ? Theme.warning : Theme.accent_border;
+
+                                                Text {
+                                                    text: "G9";
+                                                    font-size: Theme.font_body;
+                                                    font-weight: 800;
+                                                    color: root.g9_locked ? Theme.warning : Theme.accent;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+
+                                            VerticalLayout {
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text {
+                                                    text: "Аппаратная память мыши G502 & Кнопка G9 (Profile Cycle)";
+                                                    font-size: 14px;
+                                                    font-weight: 800;
+                                                    color: Theme.text_primary;
+                                                }
+                                                Text {
+                                                    text: root.g9_locked
+                                                        ? "🔒 Кнопка G9 заблокирована: профиль зафиксирован, случайные нажатия не переключают память."
+                                                        : "🔄 Кнопка G9 синхронизирована: физическое нажатие переключает профили из списка выше (Слот " + root.active_onboard_slot + ").";
+                                                    font-size: 11px;
+                                                    color: root.g9_locked ? Theme.warning : Theme.accent;
+                                                }
+                                            }
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            alignment: center;
+
+                                            // Toggle G9 Lock button
+                                            Rectangle {
+                                                height: 36px;
+                                                border-radius: 6px;
+                                                background: root.g9_locked ? Theme.warning : Theme.surface_elevated;
+                                                border-width: 1px;
+                                                border-color: root.g9_locked ? Theme.warning : Theme.border_btn;
+
+                                                HorizontalLayout {
+                                                    padding-left: 14px;
+                                                    padding-right: 14px;
+                                                    spacing: 6px;
+                                                    alignment: center;
+                                                    Text {
+                                                        text: root.g9_locked ? "🔒 G9 ЗАБЛОКИРОВАНА" : "🔄 G9 СИНХРОНИЗИРОВАНА";
+                                                        font-size: 11px;
+                                                        font-weight: 800;
+                                                        color: root.g9_locked ? Theme.app_bg : Theme.text_primary;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                                TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.toggle_g9_lock(); }
+                                                }
+                                            }
+
+                                            // Sync All Slots button
+                                            Rectangle {
+                                                height: 36px;
+                                                border-radius: 6px;
+                                                background: Theme.surface_btn;
+                                                border-width: 1px;
+                                                border-color: Theme.border_btn_hover;
+
+                                                HorizontalLayout {
+                                                    padding-left: 14px;
+                                                    padding-right: 14px;
+                                                    spacing: 6px;
+                                                    alignment: center;
+                                                    Text {
+                                                        text: "⚡ СИНХРОНИЗИРОВАТЬ ПАМЯТЬ G502";
+                                                        font-size: 11px;
+                                                        font-weight: 800;
+                                                        color: Theme.accent;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                                TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.sync_all_onboard_memory(); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Profiles List Header
+                            Text {
+                                text: "Список пользовательских профилей:";
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: Theme.text_white_dim;
                             }
 
                             // Profiles List

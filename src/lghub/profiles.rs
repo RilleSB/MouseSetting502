@@ -7,6 +7,18 @@ use super::storage::{get_storage_path, atomic_write_file};
 
 const PROFILES_FILE: &str = "profiles.json";
 const ACTIVE_PROFILE_FILE: &str = "active_profile.txt";
+const G9_CONFIG_FILE: &str = "g9_config.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct G9Config {
+    pub locked: bool,
+}
+
+impl Default for G9Config {
+    fn default() -> Self {
+        Self { locked: true }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppProfile {
@@ -169,6 +181,24 @@ pub fn delete_profile_by_id(profiles: &mut Vec<AppProfile>, id: &str) -> Result<
     }
 }
 
+/// Get G9 Lock setting (defaults to true)
+pub fn get_g9_lock() -> bool {
+    let path = get_storage_path(G9_CONFIG_FILE);
+    if path.exists()
+        && let Ok(content) = fs::read_to_string(&path)
+        && let Ok(cfg) = serde_json::from_str::<G9Config>(&content) {
+            return cfg.locked;
+        }
+    true
+}
+
+/// Set G9 Lock setting
+pub fn set_g9_lock(locked: bool) -> Result<(), String> {
+    let cfg = G9Config { locked };
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    atomic_write_file(&get_storage_path(G9_CONFIG_FILE), &json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +232,14 @@ mod tests {
         let initial_len = def.len();
         assert!(delete_profile_by_id(&mut def, "profile_work").unwrap());
         assert_eq!(def.len(), initial_len - 1);
+    }
+
+    #[test]
+    fn test_g9_config() {
+        let cfg = G9Config::default();
+        assert!(cfg.locked);
+        let serialized = serde_json::to_string(&cfg).unwrap();
+        let deserialized: G9Config = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(cfg, deserialized);
     }
 }

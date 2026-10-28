@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -11,8 +12,9 @@ use crate::hidpp::features::{
     get_device_name, get_current_dpi, set_dpi,
     set_led_effect, turn_off_all_leds,
     LedZone, LedEffect,
+    get_current_onboard_profile, set_current_onboard_profile, sync_all_onboard_profiles_dpi,
 };
-use crate::lghub::{add_dpi_preset, remove_dpi_preset, get_next_preset, get_prev_preset};
+use crate::lghub::{add_dpi_preset, remove_dpi_preset, get_next_preset, get_prev_preset, AppProfile, set_g9_lock};
 
 pub const LOGITECH_VID: u16 = 0x046D;
 pub const G502_PID: u16 = 0xC08B;
@@ -25,12 +27,16 @@ pub enum DeviceCommand {
     SetRgbCycle,
     SetRgbBreathe(u8, u8, u8),
     SetRgbOff,
+    SetOnboardProfile(u8),
+    SyncAllOnboardSlots(u16),
 }
 
 pub fn init_device_worker(
     app: &MainWindow,
     dpi_presets_model: &Rc<VecModel<i32>>,
     dpi_presets: &Arc<Mutex<Vec<u16>>>,
+    profiles: &Arc<Mutex<Vec<AppProfile>>>,
+    g9_locked: &Arc<AtomicBool>,
 ) {
     let (cmd_tx, cmd_rx) = channel::<DeviceCommand>();
 
@@ -45,6 +51,9 @@ pub fn init_device_worker(
         a.device_list().any(|d| d.vendor_id() == LOGITECH_VID && d.product_id() == G435_PID)
     }).unwrap_or(false);
     app.set_headset_connected(headset_found);
+
+    let initial_g9_lock = g9_locked.load(Ordering::SeqCst);
+    app.set_g9_locked(initial_g9_lock);
 
     if let (Some(api_ref), Some(info)) = (api.as_ref(), dev_info) {
         match api_ref.open_path(info.path()) {
@@ -64,13 +73,55 @@ pub fn init_device_worker(
                 let initial_dpi = get_current_dpi(&hidpp, 0).unwrap_or(800);
                 app.set_current_dpi(initial_dpi as i32);
 
-                // Background sync loop for hardware DPI changes (G7 / G8 physical clicks)
+                let initial_slot = get_current_onboard_profile(&hidpp).unwrap_or(1);
+                app.set_active_onboard_slot(initial_slot as i32);
+
+                // Background sync loop for hardware DPI changes (G7 / G8) and G9 profile cycles
                 let sync_worker = hidpp.clone();
                 let sync_weak = app.as_weak();
+                let g9_locked_worker = g9_locked.clone();
+                let profiles_worker = profiles.clone();
                 thread::spawn(move || {
                     let mut last_dpi = initial_dpi;
+                    let mut last_slot = initial_slot;
                     loop {
                         thread::sleep(std::time::Duration::from_millis(150));
+
+                        // 1. Check Onboard Profile (G9 cycle detection)
+                        if let Ok(current_slot) = get_current_onboard_profile(&sync_worker)
+                            && current_slot != last_slot {
+                                let was_slot = last_slot;
+                                if g9_locked_worker.load(Ordering::SeqCst) {
+                                    // G9 IS LOCKED: Force back to previous slot!
+                                    let _ = set_current_onboard_profile(&sync_worker, was_slot);
+                                    let weak = sync_weak.clone();
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(app) = weak.upgrade() {
+                                            app.set_active_onboard_slot(was_slot as i32);
+                                            app.set_status_msg("🔒 Кнопка G9 заблокирована: переключение профиля предотвращено".into());
+                                        }
+                                    });
+                                } else {
+                                    // G9 IS IN SYNC MODE: Switch app profile!
+                                    last_slot = current_slot;
+                                    let weak = sync_weak.clone();
+                                    let profs_clone = profiles_worker.clone();
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(app) = weak.upgrade() {
+                                            app.set_active_onboard_slot(current_slot as i32);
+                                            if let Ok(profs) = profs_clone.lock() {
+                                                let target_idx = (current_slot as usize).saturating_sub(1);
+                                                if let Some(p) = profs.get(target_idx) {
+                                                    app.invoke_switch_profile(p.id.clone().into());
+                                                    app.set_status_msg(format!("🎯 Кнопка G9 активировала профиль: '{}'", p.name).into());
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                        }
+
+                        // 2. Check DPI changes (G7 / G8 physical clicks)
                         if let Ok(current) = get_current_dpi(&sync_worker, 0)
                             && current != last_dpi {
                                 last_dpi = current;
@@ -151,6 +202,21 @@ pub fn init_device_worker(
                                         match res {
                                             Ok(_) => app.set_status_msg("Подсветка выключена".into()),
                                             Err(e) => app.set_status_msg(format!("Ошибка RGB: {}", e).into()),
+                                        }
+                                    }
+                                });
+                            }
+                            DeviceCommand::SetOnboardProfile(slot) => {
+                                let _ = set_current_onboard_profile(&hid_worker, slot);
+                            }
+                            DeviceCommand::SyncAllOnboardSlots(dpi) => {
+                                let res = sync_all_onboard_profiles_dpi(&hid_worker, dpi);
+                                let weak = app_weak.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = weak.upgrade() {
+                                        match res {
+                                            Ok(_) => app.set_status_msg(format!("Память G502: оба слота синхронизированы на {} DPI", dpi).into()),
+                                            Err(e) => app.set_status_msg(format!("Ошибка синхронизации памяти: {}", e).into()),
                                         }
                                     }
                                 });
@@ -274,6 +340,33 @@ pub fn init_device_worker(
         let _ = tx.send(DeviceCommand::SetRgbOff);
     });
 
+    // Callbacks for G9 & Onboard Memory
+    let g9_lock_clone = g9_locked.clone();
+    let app_weak = app.as_weak();
+    app.on_toggle_g9_lock(move || {
+        let current = g9_lock_clone.load(Ordering::SeqCst);
+        let new_val = !current;
+        g9_lock_clone.store(new_val, Ordering::SeqCst);
+        let _ = set_g9_lock(new_val);
+        if let Some(app) = app_weak.upgrade() {
+            app.set_g9_locked(new_val);
+            if new_val {
+                app.set_status_msg("🔒 Кнопка G9 заблокирована: переключение профилей отключено".into());
+            } else {
+                app.set_status_msg("🔄 Кнопка G9 синхронизирована с профилями приложения".into());
+            }
+        }
+    });
+
+    let tx = cmd_tx.clone();
+    let app_weak = app.as_weak();
+    app.on_sync_all_onboard_memory(move || {
+        if let Some(app) = app_weak.upgrade() {
+            let dpi = app.get_current_dpi() as u16;
+            let _ = tx.send(DeviceCommand::SyncAllOnboardSlots(dpi));
+        }
+    });
+
     // Refresh devices callback
     let app_weak = app.as_weak();
     app.on_refresh_devices(move || {
@@ -296,14 +389,25 @@ pub fn init_device_worker(
 fn spawn_offline_cmd_handler(cmd_rx: std::sync::mpsc::Receiver<DeviceCommand>, app_weak: slint::Weak<MainWindow>) {
     thread::spawn(move || {
         while let Ok(cmd) = cmd_rx.recv() {
-            if let DeviceCommand::SetDpi(dpi) = cmd {
-                let weak = app_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(app) = weak.upgrade() {
-                        app.set_current_dpi(dpi as i32);
-                        app.set_status_msg(format!("Установлен DPI: {} (автономный режим)", dpi).into());
-                    }
-                });
+            match cmd {
+                DeviceCommand::SetDpi(dpi) => {
+                    let weak = app_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(app) = weak.upgrade() {
+                            app.set_current_dpi(dpi as i32);
+                            app.set_status_msg(format!("Установлен DPI: {} (автономный режим)", dpi).into());
+                        }
+                    });
+                }
+                DeviceCommand::SyncAllOnboardSlots(dpi) => {
+                    let weak = app_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(app) = weak.upgrade() {
+                            app.set_status_msg(format!("Память (автономно): все слоты {} DPI", dpi).into());
+                        }
+                    });
+                }
+                _ => {}
             }
         }
     });
