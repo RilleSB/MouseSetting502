@@ -68,8 +68,9 @@ pub fn run() {
     // 5. Wire background trigger callback and Esc emergency panic stop
     setup_macro_triggers(&listener, &active_macro, &custom_macros, &lghub_settings, &app);
 
-    // 6. Explicit hook activation (starts only on button click)
-    app.set_listener_active(false);
+    // 6. Start keybind and macro trigger listener by default
+    listener.restart();
+    app.set_listener_active(true);
 
     // 7. Initialize modular controllers
     init_device_worker(&app, &dpi_presets_model, &dpi_presets);

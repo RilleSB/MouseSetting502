@@ -9,7 +9,7 @@ use hidapi::HidApi;
 use hidpp::HidppDevice;
 use hidpp::features::{
     get_device_name, get_current_dpi, set_dpi, get_dpi_range,
-    set_led_effect, turn_off_all_leds, enable_host_mode,
+    set_led_effect, turn_off_all_leds,
     LedZone, LedEffect,
 };
 use lghub::{LgHubSettings, macro_engine};
@@ -42,7 +42,10 @@ fn open_g502(api: &HidApi) -> Result<HidppDevice, String> {
 
     let dev = api.open_path(info.path()).map_err(|e| format!("Failed to open G502: {e}"))?;
     let hidpp = HidppDevice::new(dev, 0xFF);
-    let _ = enable_host_mode(&hidpp); // Initialize host mode once
+    // Keep Onboard Mode (0x01) so G7/G8 physical DPI buttons work in hardware
+    if let Ok(feat_idx) = hidpp.get_feature_index(0x8100) {
+        let _ = hidpp.call_function(feat_idx, 0x01, &[0x01]);
+    }
     Ok(hidpp)
 }
 

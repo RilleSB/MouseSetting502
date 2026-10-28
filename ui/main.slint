@@ -1420,15 +1420,64 @@ export struct QuickKeyItem {
                     }
 
                     Text {
+                        text: "Действия сенсора (переключение DPI):";
+                        font-size: Theme.font_caption;
+                        font-weight: 700;
+                        color: Theme.text_secondary;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 38px;
+                            border-radius: Theme.radius_md;
+                            background: Theme.surface_alt;
+                            border-width: 1px;
+                            border-color: Theme.border_btn;
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                Text { text: "◀"; font-size: Theme.font_caption; color: Theme.accent; vertical-alignment: center; }
+                                Text { text: "DPI ВНИЗ (Пресет)"; font-size: Theme.font_caption; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; }
+                            }
+                            TouchArea {
+                                clicked => { root.assign_keybind(root.picker_button_id, "__DPI_DOWN__"); }
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 38px;
+                            border-radius: Theme.radius_md;
+                            background: Theme.surface_alt;
+                            border-width: 1px;
+                            border-color: Theme.border_btn;
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                Text { text: "DPI ВВЕРХ (Пресет)"; font-size: Theme.font_caption; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; }
+                                Text { text: "▶"; font-size: Theme.font_caption; color: Theme.accent; vertical-alignment: center; }
+                            }
+                            TouchArea {
+                                clicked => { root.assign_keybind(root.picker_button_id, "__DPI_UP__"); }
+                            }
+                        }
+                    }
+
+                    Text {
                         text: "Выберите макрос из списка доступных:";
-                        font-size: 12px;
+                        font-size: Theme.font_caption;
                         font-weight: 700;
                         color: Theme.text_secondary;
                     }
 
                     // Available macros list
                     ScrollView {
-                        height: 310px;
+                        height: 250px;
                         VerticalLayout {
                             spacing: 6px;
 

@@ -88,7 +88,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
             button_label: "G7 • DPI Вниз".into(),
             default_action: "Уменьшить DPI".into(),
             vk_code: 0x7D, // VK_F14
-            assigned_macro: "".into(),
+            assigned_macro: "__DPI_DOWN__".into(),
             is_mouse_button: true,
         },
         ButtonBinding {
@@ -96,7 +96,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
             button_label: "G8 • DPI Вверх".into(),
             default_action: "Увеличить DPI".into(),
             vk_code: 0x7E, // VK_F15
-            assigned_macro: "".into(),
+            assigned_macro: "__DPI_UP__".into(),
             is_mouse_button: true,
         },
         ButtonBinding {
@@ -152,7 +152,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
             button_label: "Клавиша F9".into(),
             default_action: "Горячая клавиша F9".into(),
             vk_code: 0x78, // VK_F9
-            assigned_macro: "".into(),
+            assigned_macro: "__DPI_DOWN__".into(),
             is_mouse_button: false,
         },
         ButtonBinding {
@@ -160,7 +160,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
             button_label: "Клавиша F10".into(),
             default_action: "Горячая клавиша F10".into(),
             vk_code: 0x79, // VK_F10
-            assigned_macro: "".into(),
+            assigned_macro: "__DPI_UP__".into(),
             is_mouse_button: false,
         },
         ButtonBinding {
@@ -325,16 +325,16 @@ fn check_and_dispatch_vk(vk: u16) -> bool {
                 if let Some(b) = binds.iter().find(|b| b.vk_code == vk) {
                     if !b.assigned_macro.trim().is_empty() {
                         Some(b.assigned_macro.clone())
-                    } else if b.button_id == "G7" || vk == 0x7D {
+                    } else if b.button_id == "G7" || b.button_id == "F9" || vk == 0x7D || vk == 0x78 {
                         Some("__DPI_DOWN__".to_string())
-                    } else if b.button_id == "G8" || vk == 0x7E {
+                    } else if b.button_id == "G8" || b.button_id == "F10" || vk == 0x7E || vk == 0x79 {
                         Some("__DPI_UP__".to_string())
                     } else {
                         None
                     }
-                } else if vk == 0x7D {
+                } else if vk == 0x7D || vk == 0x78 {
                     Some("__DPI_DOWN__".to_string())
-                } else if vk == 0x7E {
+                } else if vk == 0x7E || vk == 0x79 {
                     Some("__DPI_UP__".to_string())
                 } else {
                     None

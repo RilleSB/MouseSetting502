@@ -9,7 +9,7 @@ use super::bridge::MainWindow;
 use crate::hidpp::HidppDevice;
 use crate::hidpp::features::{
     get_device_name, get_current_dpi, set_dpi,
-    set_led_effect, turn_off_all_leds, enable_host_mode,
+    set_led_effect, turn_off_all_leds,
     LedZone, LedEffect,
 };
 use crate::lghub::{add_dpi_preset, remove_dpi_preset, get_next_preset, get_prev_preset};
@@ -50,7 +50,10 @@ pub fn init_device_worker(
         match api_ref.open_path(info.path()) {
             Ok(dev) => {
                 let hidpp = Arc::new(HidppDevice::new(dev, 0xFF));
-                let _ = enable_host_mode(&hidpp);
+                // Keep Onboard Mode (0x01) so G7/G8 physical DPI buttons operate in hardware
+                if let Ok(feat_idx) = hidpp.get_feature_index(0x8100) {
+                    let _ = hidpp.call_function(feat_idx, 0x01, &[0x01]);
+                }
 
                 if let Ok(name) = get_device_name(&hidpp) {
                     app.set_device_name(name.into());
@@ -58,9 +61,29 @@ pub fn init_device_worker(
                 app.set_device_connected(true);
                 app.set_status_msg("Устройство подключено и готово к работе".into());
 
-                if let Ok(dpi) = get_current_dpi(&hidpp, 0) {
-                    app.set_current_dpi(dpi as i32);
-                }
+                let initial_dpi = get_current_dpi(&hidpp, 0).unwrap_or(800);
+                app.set_current_dpi(initial_dpi as i32);
+
+                // Background sync loop for hardware DPI changes (G7 / G8 physical clicks)
+                let sync_worker = hidpp.clone();
+                let sync_weak = app.as_weak();
+                thread::spawn(move || {
+                    let mut last_dpi = initial_dpi;
+                    loop {
+                        thread::sleep(std::time::Duration::from_millis(150));
+                        if let Ok(current) = get_current_dpi(&sync_worker, 0)
+                            && current != last_dpi {
+                                last_dpi = current;
+                                let weak = sync_weak.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = weak.upgrade() {
+                                        app.set_current_dpi(current as i32);
+                                        app.set_status_msg(format!("Аппаратный DPI мыши: {}", current).into());
+                                    }
+                                });
+                        }
+                    }
+                });
 
                 let hid_worker = hidpp.clone();
                 let app_weak = app.as_weak();

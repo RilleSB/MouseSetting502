@@ -431,7 +431,9 @@ export component KeybindRow inherits Rectangle {
                     color: Theme.text_primary;
                 }
                 Text {
-                    text: root.assigned_macro != "" ? ("⚡ НАЗНАЧЕН МАКРОС: " + root.assigned_macro) : ("По умолчанию: " + root.default_action);
+                    text: root.assigned_macro == "__DPI_DOWN__" ? "🎯 ДЕЙСТВИЕ: DPI Вниз (Предыдущий пресет)" :
+                          root.assigned_macro == "__DPI_UP__" ? "🎯 ДЕЙСТВИЕ: DPI Вверх (Следующий пресет)" :
+                          root.assigned_macro != "" ? ("⚡ НАЗНАЧЕН МАКРОС: " + root.assigned_macro) : ("По умолчанию: " + root.default_action);
                     font-size: Theme.font_caption;
                     font-weight: 600;
                     color: root.assigned_macro != "" ? Theme.success : Theme.text_subtle;
