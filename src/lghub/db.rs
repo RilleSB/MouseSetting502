@@ -137,8 +137,8 @@ impl LgHubSettings {
                         }
 
                         // 2. Primary key down & up
-                        if let Some(code) = hid_code {
-                            if let Some(vk) = hid_usage_to_vk(code) {
+                        if let Some(code) = hid_code
+                            && let Some(vk) = hid_usage_to_vk(code) {
                                 components.push(LgMacroComponent {
                                     mouse_button: None,
                                     mouse_down: None,
@@ -154,7 +154,6 @@ impl LgHubSettings {
                                     delay_ms: None,
                                 });
                             }
-                        }
 
                         // 3. Modifiers up (reverse order)
                         for &mod_hid in modifiers.iter().rev() {
@@ -247,14 +246,10 @@ fn parse_component(comp: &serde_json::Value, out: &mut Vec<LgMacroComponent>) {
     else if let Some(kb) = comp.get("keyboard") {
         let hid_usage = if let Some(s) = kb.get("hidUsage").and_then(|v| v.as_str()) {
             s.parse::<u32>().ok()
-        } else if let Some(n) = kb.get("hidUsage").and_then(|v| v.as_u64()) {
-            Some(n as u32)
-        } else {
-            None
-        };
+        } else { kb.get("hidUsage").and_then(|v| v.as_u64()).map(|n| n as u32) };
 
-        if let Some(hid) = hid_usage {
-            if let Some(vk) = hid_usage_to_vk(hid) {
+        if let Some(hid) = hid_usage
+            && let Some(vk) = hid_usage_to_vk(hid) {
                 let is_down = kb.get("isDown").and_then(|v| v.as_bool()).unwrap_or(false);
                 out.push(LgMacroComponent {
                     mouse_button: None,
@@ -264,7 +259,6 @@ fn parse_component(comp: &serde_json::Value, out: &mut Vec<LgMacroComponent>) {
                     delay_ms: None,
                 });
             }
-        }
     }
     // 3. Delay component
     else if let Some(delay) = comp.get("delay") {

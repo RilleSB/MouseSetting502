@@ -1,0 +1,132 @@
+[
+  {
+    "name": "⚡ Быстрый клик ЛКМ (Toggle)",
+    "macro_type": "toggle",
+    "action_name": "Auto-Clicker Left Button",
+    "is_toggle": true,
+    "sequence": [
+      {
+        "mouse_button": 1,
+        "mouse_down": true,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 15
+      },
+      {
+        "mouse_button": 1,
+        "mouse_down": false,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 15
+      }
+    ]
+  },
+  {
+    "name": "🎯 Тройной выстрел (Burst 3x)",
+    "macro_type": "sequence",
+    "action_name": "3x Left Click Burst",
+    "is_toggle": false,
+    "sequence": [
+      {
+        "mouse_button": 1,
+        "mouse_down": true,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 15
+      },
+      {
+        "mouse_button": 1,
+        "mouse_down": false,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 40
+      },
+      {
+        "mouse_button": 1,
+        "mouse_down": true,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 15
+      },
+      {
+        "mouse_button": 1,
+        "mouse_down": false,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 40
+      },
+      {
+        "mouse_button": 1,
+        "mouse_down": true,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 15
+      },
+      {
+        "mouse_button": 1,
+        "mouse_down": false,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 10
+      }
+    ]
+  },
+  {
+    "name": "🚀 Прыжок с приседанием (Crouch Jump)",
+    "macro_type": "sequence",
+    "action_name": "Space + Ctrl Jump",
+    "is_toggle": false,
+    "sequence": [
+      {
+        "mouse_button": null,
+        "mouse_down": null,
+        "vk_code": 32,
+        "key_down": true,
+        "delay_ms": 10
+      },
+      {
+        "mouse_button": null,
+        "mouse_down": null,
+        "vk_code": 17,
+        "key_down": true,
+        "delay_ms": 60
+      },
+      {
+        "mouse_button": null,
+        "mouse_down": null,
+        "vk_code": 32,
+        "key_down": false,
+        "delay_ms": 10
+      },
+      {
+        "mouse_button": null,
+        "mouse_down": null,
+        "vk_code": 17,
+        "key_down": false,
+        "delay_ms": 10
+      }
+    ]
+  },
+  {
+    "name": "🔄 Спам ПКМ (Toggle)",
+    "macro_type": "toggle",
+    "action_name": "Auto-Clicker Right Button",
+    "is_toggle": true,
+    "sequence": [
+      {
+        "mouse_button": 2,
+        "mouse_down": true,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 25
+      },
+      {
+        "mouse_button": 2,
+        "mouse_down": false,
+        "vk_code": null,
+        "key_down": null,
+        "delay_ms": 25
+      }
+    ]
+  }
+]

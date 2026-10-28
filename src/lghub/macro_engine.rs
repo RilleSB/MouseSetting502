@@ -33,10 +33,10 @@ pub fn send_mouse_click(button: u8, down: bool) {
         (2, false) => (MOUSEEVENTF_RIGHTUP, 0),
         (3, true) => (MOUSEEVENTF_MIDDLEDOWN, 0),
         (3, false) => (MOUSEEVENTF_MIDDLEUP, 0),
-        (4, true) => (MOUSEEVENTF_XDOWN, XBUTTON1 as u32),
-        (4, false) => (MOUSEEVENTF_XUP, XBUTTON1 as u32),
-        (5, true) => (MOUSEEVENTF_XDOWN, XBUTTON2 as u32),
-        (5, false) => (MOUSEEVENTF_XUP, XBUTTON2 as u32),
+        (4, true) => (MOUSEEVENTF_XDOWN, XBUTTON1),
+        (4, false) => (MOUSEEVENTF_XUP, XBUTTON1),
+        (5, true) => (MOUSEEVENTF_XDOWN, XBUTTON2),
+        (5, false) => (MOUSEEVENTF_XUP, XBUTTON2),
         _ => return,
     };
 
@@ -208,9 +208,8 @@ fn execute_component(comp: &LgMacroComponent, state: &Arc<Mutex<TrackedState>>) 
         send_key_event(vk, down);
     }
 
-    if let Some(ms) = comp.delay_ms {
-        if ms > 0 {
+    if let Some(ms) = comp.delay_ms
+        && ms > 0 {
             thread::sleep(Duration::from_millis(ms));
         }
-    }
 }

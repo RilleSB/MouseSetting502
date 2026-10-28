@@ -54,7 +54,7 @@ fn print_banner() {
 
 fn print_help() {
     println!("\nUsage:");
-    println!("  ghub_rust                       Launch Desktop GUI");
+    println!("  ghub_rust                       Launch Modern Desktop GUI");
     println!("  ghub_rust --cli                 Display mouse status in CLI");
     println!("  ghub_rust --dpi <value>         Set active DPI (100 - 25600, step 50)");
     println!("  ghub_rust --color <HEX>         Set static RGB color (e.g. --color 00FFCC)");
@@ -62,8 +62,8 @@ fn print_help() {
     println!("  ghub_rust --breathe <HEX>       Enable breathing effect with color");
     println!("  ghub_rust --off                 Turn off RGB lighting");
     println!("  ghub_rust --scan                Scan all Logitech devices & endpoints");
-    println!("  ghub_rust --macros              List all profiles and macros from G HUB database");
-    println!("  ghub_rust --run-macro <name>    Test play a macro from G HUB (e.g. --run-macro lkm)");
+    println!("  ghub_rust --macros              List all macros (G HUB & Custom) and keybinds");
+    println!("  ghub_rust --run-macro <name>    Test play a macro (e.g. --run-macro lkm)");
     println!("  ghub_rust --help                Show this help message");
 }
 
@@ -85,14 +85,21 @@ fn main() {
 
     print_banner();
 
-    // 3. G HUB Macro Inspection command
+    // 3. Macro & Keybind Inspection command
     if args.len() > 1 && (args[1] == "--macros" || args[1] == "-m") {
+        println!("\n[+] Custom User Macros (user_macros.json):");
+        let custom = lghub::load_custom_macros();
+        for (i, m) in custom.iter().enumerate() {
+            let toggle_str = if m.is_toggle { " (Toggle / Auto-clicker)" } else { " (Sequence)" };
+            println!("  #{} '{}' -> Type: {}{}, Steps: {}", i + 1, m.name, m.macro_type, toggle_str, m.sequence.len());
+        }
+
         println!("\n[+] Reading original G HUB settings database...");
         match LgHubSettings::load_from_db() {
             Ok(settings) => {
                 println!("Loaded {} cards and {} profiles from G HUB.", settings.cards.len(), settings.profiles.len());
 
-                println!("\n--- Custom & Recorded Macros ---");
+                println!("\n--- G HUB Recorded Macros ---");
                 let mut macro_count = 0;
                 for card in &settings.cards {
                     if let Some(m) = &card.macro_data {
@@ -105,22 +112,19 @@ fn main() {
                         println!("       Sequence length: {} steps", m.sequence.len());
                     }
                 }
-
-                println!("\n--- G502 HERO Active Profiles & Bindings ---");
-                for prof in &settings.profiles {
-                    let g502_binds: Vec<_> = prof.assignments.iter().filter(|a| a.slot_id.contains("g502")).collect();
-                    if !g502_binds.is_empty() {
-                        println!("\nProfile: '{}':", prof.name);
-                        for b in g502_binds {
-                            let card_name = settings.find_card(&b.card_id)
-                                .and_then(|c| c.name.clone())
-                                .unwrap_or_else(|| b.card_id.clone());
-                            println!("  Button {:<24} -> {}", b.slot_id, card_name);
-                        }
-                    }
-                }
             }
-            Err(e) => eprintln!("[-] Failed to load G HUB database: {e}"),
+            Err(e) => eprintln!("[-] G HUB database not loaded: {e}"),
+        }
+
+        println!("\n[+] Configured G502 & Hotkey Keybindings (keybinds.json):");
+        let binds = lghub::load_bindings();
+        for b in &binds {
+            let status = if b.assigned_macro.is_empty() {
+                format!("(Default: {})", b.default_action)
+            } else {
+                format!("-> ⚡ MACRO: '{}'", b.assigned_macro)
+            };
+            println!("  Button {:<26} {}", b.button_label, status);
         }
         return;
     }
@@ -132,34 +136,43 @@ fn main() {
             return;
         }
         let macro_name = &args[2];
-        println!("\n[*] Looking for macro '{}' in G HUB database...", macro_name);
-        match LgHubSettings::load_from_db() {
-            Ok(settings) => {
-                let target_card = settings.cards.iter().find(|c| {
-                    c.name.as_deref().unwrap_or("") == macro_name
-                        || c.macro_data.as_ref().map(|m| m.name.as_str()).unwrap_or("") == macro_name
-                });
+        println!("\n[*] Looking for macro '{}'...", macro_name);
 
-                if let Some(card) = target_card {
-                    if let Some(m) = &card.macro_data {
-                        println!("[+] Found macro '{}' (Toggle: {})! Running for 3 seconds...", m.name, m.is_toggle);
-                        if m.is_toggle {
-                            let active = macro_engine::start_macro_loop(m.clone());
-                            thread::sleep(Duration::from_secs(3));
-                            active.stop();
-                            println!("[+] Finished test execution.");
-                        } else {
-                            macro_engine::play_macro_once(m);
-                            println!("[+] Executed macro sequence once.");
-                        }
+        // Check custom macros first
+        let custom = lghub::load_custom_macros();
+        let target_custom = custom.iter().find(|m| m.name.contains(macro_name) || m.name == *macro_name).cloned();
+
+        let target = if let Some(m) = target_custom {
+            Some(m)
+        } else {
+            // Check G HUB DB
+            match LgHubSettings::load_from_db() {
+                Ok(settings) => settings.cards.iter().find_map(|c| {
+                    if c.name.as_deref().unwrap_or("").contains(macro_name)
+                        || c.macro_data.as_ref().map(|m| m.name.as_str()).unwrap_or("").contains(macro_name)
+                    {
+                        c.macro_data.clone()
                     } else {
-                        eprintln!("[-] Card '{}' has no macro sequence payload.", macro_name);
+                        None
                     }
-                } else {
-                    eprintln!("[-] Macro '{}' not found in G HUB database.", macro_name);
-                }
+                }),
+                Err(_) => None,
             }
-            Err(e) => eprintln!("[-] Database error: {e}"),
+        };
+
+        if let Some(m) = target {
+            println!("[+] Found macro '{}' (Toggle: {})! Running for 3 seconds...", m.name, m.is_toggle);
+            if m.is_toggle {
+                let active = macro_engine::start_macro_loop(m.clone());
+                thread::sleep(Duration::from_secs(3));
+                active.stop();
+                println!("[+] Finished test execution.");
+            } else {
+                macro_engine::play_macro_once(&m);
+                println!("[+] Executed macro sequence once.");
+            }
+        } else {
+            eprintln!("[-] Macro '{}' not found in custom macros or G HUB database.", macro_name);
         }
         return;
     }

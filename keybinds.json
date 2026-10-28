@@ -1,0 +1,122 @@
+[
+  {
+    "button_id": "G1",
+    "button_label": "G1 • Основная (ЛКМ)",
+    "default_action": "Основной клик",
+    "vk_code": 1,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G2",
+    "button_label": "G2 • Вторичная (ПКМ)",
+    "default_action": "Контекстный клик",
+    "vk_code": 2,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G3",
+    "button_label": "G3 • Колесо (СКМ)",
+    "default_action": "Клик колеса",
+    "vk_code": 4,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G4",
+    "button_label": "G4 • Боковая назад",
+    "default_action": "Назад (Браузер)",
+    "vk_code": 5,
+    "assigned_macro": "⚡ Быстрый клик ЛКМ (Toggle)",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G5",
+    "button_label": "G5 • Боковая вперед",
+    "default_action": "Вперед (Браузер)",
+    "vk_code": 6,
+    "assigned_macro": "🎯 Тройной выстрел (Burst 3x)",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G6",
+    "button_label": "G6 • Снайпер (DPI Shift)",
+    "default_action": "Прицеливание (DPI Shift)",
+    "vk_code": 124,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G7",
+    "button_label": "G7 • DPI Вниз",
+    "default_action": "Уменьшить DPI",
+    "vk_code": 125,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G8",
+    "button_label": "G8 • DPI Вверх",
+    "default_action": "Увеличить DPI",
+    "vk_code": 126,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G9",
+    "button_label": "G9 • Смена профиля",
+    "default_action": "Цикл профилей G502",
+    "vk_code": 127,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G10",
+    "button_label": "G10 • Наклон колеса влево",
+    "default_action": "Прокрутка влево",
+    "vk_code": 128,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "G11",
+    "button_label": "G11 • Наклон колеса вправо",
+    "default_action": "Прокрутка вправо",
+    "vk_code": 129,
+    "assigned_macro": "",
+    "is_mouse_button": true
+  },
+  {
+    "button_id": "F6",
+    "button_label": "Клавиша F6",
+    "default_action": "Горячая клавиша F6",
+    "vk_code": 117,
+    "assigned_macro": "",
+    "is_mouse_button": false
+  },
+  {
+    "button_id": "F7",
+    "button_label": "Клавиша F7",
+    "default_action": "Горячая клавиша F7",
+    "vk_code": 118,
+    "assigned_macro": "",
+    "is_mouse_button": false
+  },
+  {
+    "button_id": "F8",
+    "button_label": "Клавиша F8",
+    "default_action": "Горячая клавиша F8",
+    "vk_code": 119,
+    "assigned_macro": "",
+    "is_mouse_button": false
+  },
+  {
+    "button_id": "F9",
+    "button_label": "Клавиша F9",
+    "default_action": "Горячая клавиша F9",
+    "vk_code": 120,
+    "assigned_macro": "",
+    "is_mouse_button": false
+  }
+]
