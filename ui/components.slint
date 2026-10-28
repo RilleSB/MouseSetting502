@@ -1,0 +1,541 @@
+import { Theme } from "theme.slint";
+
+export component Card inherits Rectangle {
+    in property <color> bg: Theme.card_bg;
+    in property <color> border_col: Theme.border_card;
+    in property <length> corner_radius: Theme.radius_lg;
+
+    background: root.bg;
+    border-radius: root.corner_radius;
+    border-width: 1px;
+    border-color: root.border_col;
+}
+
+export component Pill inherits Rectangle {
+    in property <string> text: "";
+    in property <color> text_color: Theme.text_primary;
+    in property <color> bg_col: Theme.surface_subtle;
+    in property <color> border_col: Theme.border_default;
+    in property <color> dot_color: Theme.success_dot;
+    in property <bool> show_dot: false;
+    in property <length> font_sz: Theme.font_body_sm;
+    in property <length> pill_height: 32px;
+
+    height: root.pill_height;
+    border-radius: Theme.radius_md;
+    background: root.bg_col;
+    border-width: 1px;
+    border-color: root.border_col;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 8px;
+        alignment: center;
+
+        if root.show_dot : Rectangle {
+            width: 8px;
+            height: 8px;
+            border-radius: Theme.radius_sm;
+            background: root.dot_color;
+            y: 12px;
+        }
+
+        Text {
+            text: root.text;
+            font-size: root.font_sz;
+            font-weight: 600;
+            color: root.text_color;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component IconButton inherits Rectangle {
+    in property <string> icon: "";
+    in property <length> icon_size: 13px;
+    in property <color> icon_color: Theme.text_primary;
+    in property <color> bg_col: Theme.surface_alt;
+    in property <color> border_col: Theme.border_btn;
+    in property <length> corner_radius: Theme.radius_md;
+    in property <length> btn_width: 34px;
+    in property <length> btn_height: 32px;
+    callback clicked();
+
+    width: root.btn_width;
+    height: root.btn_height;
+    border-radius: root.corner_radius;
+    background: root.bg_col;
+    border-width: 1px;
+    border-color: root.border_col;
+
+    Text {
+        text: root.icon;
+        font-size: root.icon_size;
+        font-weight: 700;
+        color: root.icon_color;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component SidebarItem inherits Rectangle {
+    in property <string> title: "";
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 46px;
+    border-radius: Theme.radius_base;
+    background: root.active ? Theme.card_hover : transparent;
+    border-width: root.active ? 1px : 0px;
+    border-color: Theme.border_active;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        spacing: 12px;
+
+        Rectangle {
+            width: 3px;
+            height: 20px;
+            border-radius: Theme.radius_xs;
+            background: root.active ? Theme.accent : transparent;
+            y: 13px;
+        }
+
+        Text {
+            text: root.title;
+            font-size: Theme.font_body;
+            font-weight: 700;
+            color: root.active ? Theme.text_primary : Theme.text_secondary;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Modal inherits Rectangle {
+    in property <length> modal_width: 680px;
+    in property <length> modal_height: 600px;
+    in property <string> title: "";
+    in property <string> subtitle: "";
+    callback close();
+
+    background: Theme.overlay;
+
+    TouchArea {
+        // Blocks clicks outside modal content
+    }
+
+    Rectangle {
+        width: root.modal_width;
+        height: root.modal_height;
+        border-radius: Theme.radius_lg;
+        background: Theme.card_bg_subtle;
+        border-width: 1px;
+        border-color: Theme.border_default;
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 18px;
+
+            // Modal Header
+            HorizontalLayout {
+                alignment: space-between;
+
+                VerticalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: root.title;
+                        font-size: Theme.font_title;
+                        font-weight: 800;
+                        color: Theme.text_primary;
+                    }
+                    if root.subtitle != "" : Text {
+                        text: root.subtitle;
+                        font-size: Theme.font_body_sm;
+                        color: Theme.text_subtle;
+                    }
+                }
+
+                IconButton {
+                    icon: "✕";
+                    icon_size: 13px;
+                    icon_color: Theme.text_secondary;
+                    btn_width: 32px;
+                    btn_height: 32px;
+                    bg_col: Theme.surface_elevated;
+                    border_col: Theme.border_default;
+                    clicked => { root.close(); }
+                }
+            }
+
+            @children
+        }
+    }
+}
+
+export component MacroRow inherits Rectangle {
+    in property <string> name: "";
+    in property <string> macro_type: "";
+    in property <bool> is_toggle: false;
+    in property <int> steps_count: 0;
+    in property <bool> is_custom: false;
+    in property <bool> is_active: false;
+    callback toggle();
+    callback edit();
+    callback delete();
+
+    height: 58px;
+    border-radius: Theme.radius_base;
+    background: root.is_active ? Theme.accent_subtle : Theme.card_bg_subtle;
+    border-width: 1px;
+    border-color: root.is_active ? Theme.accent : Theme.border_subtle;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+
+            Text {
+                text: root.is_toggle ? "🔄" : "⚡";
+                font-size: Theme.font_title;
+                vertical-alignment: center;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.name;
+                        font-size: Theme.font_md;
+                        font-weight: 800;
+                        color: Theme.text_primary;
+                    }
+                    Rectangle {
+                        height: 18px;
+                        border-radius: Theme.radius_xs;
+                        background: root.is_custom ? Theme.badge_custom_bg : Theme.surface_alt;
+                        HorizontalLayout {
+                            padding-left: 6px; padding-right: 6px;
+                            Text {
+                                text: root.is_custom ? "ПОЛЬЗОВАТЕЛЬСКИЙ" : "G HUB";
+                                font-size: Theme.font_xs;
+                                font-weight: 700;
+                                color: root.is_custom ? Theme.accent : Theme.text_secondary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Rectangle {
+                        height: 18px;
+                        border-radius: Theme.radius_xs;
+                        background: root.is_toggle ? Theme.warning_subtle : Theme.accent_teal;
+                        HorizontalLayout {
+                            padding-left: 6px; padding-right: 6px;
+                            Text {
+                                text: root.is_toggle ? "АВТОКЛИКЕР (TOGGLE)" : "СЕКВЕНЦИЯ";
+                                font-size: Theme.font_xs;
+                                font-weight: 700;
+                                color: root.is_toggle ? Theme.warning : Theme.accent_secondary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.steps_count + " шагов в цепочке";
+                    font-size: Theme.font_caption;
+                    color: Theme.text_subtle;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+
+            // Run/Toggle Button
+            Rectangle {
+                height: 32px;
+                border-radius: Theme.radius_md;
+                background: root.is_active ? Theme.accent : Theme.surface_active;
+                border-width: 1px;
+                border-color: root.is_active ? Theme.accent : Theme.border_light;
+                y: 13px;
+
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px;
+                    Text {
+                        text: root.is_active ? "⏸ ОСТАНОВИТЬ" : "▶ ЗАПУСТИТЬ";
+                        font-size: Theme.font_caption;
+                        font-weight: 800;
+                        color: root.is_active ? Theme.text_dark : Theme.text_primary;
+                        vertical-alignment: center;
+                    }
+                }
+                TouchArea { clicked => { root.toggle(); } }
+            }
+
+            // Edit button (for custom macros)
+            if root.is_custom : Rectangle {
+                width: 32px; height: 32px;
+                border-radius: Theme.radius_md;
+                background: Theme.surface_active;
+                border-width: 1px;
+                border-color: Theme.border_light;
+                y: 13px;
+                Text { text: "✏️"; font-size: Theme.font_caption; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.edit(); } }
+            }
+
+            // Delete button (for custom macros)
+            if root.is_custom : Rectangle {
+                width: 32px; height: 32px;
+                border-radius: Theme.radius_md;
+                background: Theme.error_btn_bg;
+                border-width: 1px;
+                border-color: Theme.error_border;
+                y: 13px;
+                Text { text: "🗑️"; font-size: Theme.font_caption; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.delete(); } }
+            }
+        }
+    }
+}
+
+export component StepRow inherits Rectangle {
+    in property <int> idx: 0;
+    in property <string> step_text: "";
+    callback move_up();
+    callback move_down();
+    callback remove();
+
+    height: 28px;
+    border-radius: Theme.radius_sm;
+    background: Theme.surface_step;
+
+    HorizontalLayout {
+        padding-left: 10px; padding-right: 10px; alignment: space-between;
+        Text {
+            text: "#" + (root.idx + 1) + "  " + root.step_text;
+            font-size: Theme.font_caption;
+            color: Theme.text_white_soft;
+            vertical-alignment: center;
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            // Move up
+            Rectangle {
+                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.step_btn_bg; y: 4px;
+                Text { text: "▲"; font-size: Theme.font_xs; font-weight: 800; color: Theme.text_secondary; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.move_up(); } }
+            }
+
+            // Move down
+            Rectangle {
+                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.step_btn_bg; y: 4px;
+                Text { text: "▼"; font-size: Theme.font_xs; font-weight: 800; color: Theme.text_secondary; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.move_down(); } }
+            }
+
+            // Delete
+            Rectangle {
+                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.error_btn_bg; y: 4px;
+                Text { text: "✕"; font-size: Theme.font_sm; font-weight: 800; color: Theme.error_bright; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.remove(); } }
+            }
+        }
+    }
+}
+
+export component KeybindRow inherits Rectangle {
+    in property <string> button_id: "";
+    in property <string> button_label: "";
+    in property <string> default_action: "";
+    in property <string> assigned_macro: "";
+    in property <bool> is_mouse: false;
+    callback assign();
+    callback clear();
+
+    height: 52px;
+    border-radius: Theme.radius_base;
+    background: root.assigned_macro != "" ? Theme.success_subtle : Theme.card_bg_subtle;
+    border-width: 1px;
+    border-color: root.assigned_macro != "" ? Theme.success_border : Theme.border_subtle;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+
+            // Button badge
+            Rectangle {
+                width: 44px;
+                height: 30px;
+                border-radius: Theme.radius_md;
+                background: root.is_mouse ? Theme.accent_light : Theme.purple_subtle;
+                border-width: 1px;
+                border-color: root.is_mouse ? Theme.accent_border : Theme.purple_border;
+                y: 11px;
+
+                Text {
+                    text: root.button_id;
+                    font-size: Theme.font_body_sm;
+                    font-weight: 800;
+                    color: root.is_mouse ? Theme.accent : Theme.purple_text;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.button_label;
+                    font-size: Theme.font_body;
+                    font-weight: 700;
+                    color: Theme.text_primary;
+                }
+                Text {
+                    text: root.assigned_macro != "" ? ("⚡ НАЗНАЧЕН МАКРОС: " + root.assigned_macro) : ("По умолчанию: " + root.default_action);
+                    font-size: Theme.font_caption;
+                    font-weight: 600;
+                    color: root.assigned_macro != "" ? Theme.success : Theme.text_subtle;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+
+            // Assign button
+            Rectangle {
+                height: 32px;
+                border-radius: Theme.radius_md;
+                background: Theme.surface_btn;
+                border-width: 1px;
+                border-color: Theme.border_btn_hover;
+                y: 10px;
+
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px;
+                    Text {
+                        text: root.assigned_macro != "" ? "ИЗМЕНИТЬ" : "НАЗНАЧИТЬ МАКРОС";
+                        font-size: Theme.font_caption;
+                        font-weight: 800;
+                        color: root.assigned_macro != "" ? Theme.success : Theme.accent;
+                        vertical-alignment: center;
+                    }
+                }
+                TouchArea { clicked => { root.assign(); } }
+            }
+
+            // Reset to default button
+            if root.assigned_macro != "" : Rectangle {
+                width: 32px; height: 32px;
+                border-radius: Theme.radius_md;
+                background: Theme.error_btn_bg;
+                border-width: 1px;
+                border-color: Theme.error_border;
+                y: 10px;
+                Text { text: "↺"; font-size: Theme.font_md; font-weight: 800; color: Theme.error_bright; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.clear(); } }
+            }
+        }
+    }
+}
+
+export component SwatchButton inherits Rectangle {
+    in property <color> swatch_color: Theme.accent;
+    in property <bool> is_selected: false;
+    callback clicked();
+
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    background: root.swatch_color;
+    border-width: root.is_selected ? 3px : 1px;
+    border-color: root.is_selected ? Theme.text_primary : Theme.swatch_border_unselected;
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component QuickKeyButton inherits Rectangle {
+    in property <string> label: "";
+    in property <int> vk: 0;
+    callback clicked(int);
+
+    height: 32px;
+    border-radius: Theme.radius_md;
+    background: Theme.surface_btn;
+    border-width: 1px;
+    border-color: Theme.border_btn;
+
+    HorizontalLayout {
+        padding-left: 12px; padding-right: 12px;
+        Text {
+            text: root.label;
+            font-size: Theme.font_caption;
+            font-weight: 700;
+            color: Theme.text_white_soft;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(root.vk); }
+    }
+}
+
+export component QuickDelayButton inherits Rectangle {
+    in property <int> delay_ms: 50;
+    callback clicked(int);
+
+    height: 30px;
+    border-radius: Theme.radius_md;
+    background: Theme.surface_btn;
+    border-width: 1px;
+    border-color: Theme.border_btn;
+
+    HorizontalLayout {
+        padding-left: 10px; padding-right: 10px;
+        Text {
+            text: "+" + root.delay_ms + "мс";
+            font-size: Theme.font_caption;
+            font-weight: 700;
+            color: Theme.accent;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(root.delay_ms); }
+    }
+}
