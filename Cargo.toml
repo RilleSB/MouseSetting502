@@ -6,6 +6,13 @@ edition = "2024"
 [dependencies]
 hidapi = "2.6.7"
 rusqlite = { version = "0.41.0", features = ["bundled"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
-slint = "1.18.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+slint = { version = "1.18.1", features = ["backend-default", "renderer-femtovg", "system-tray"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+] }

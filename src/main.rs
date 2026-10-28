@@ -9,7 +9,8 @@ use hidapi::HidApi;
 use hidpp::HidppDevice;
 use hidpp::features::{
     get_device_name, get_current_dpi, set_dpi, get_dpi_range,
-    set_led_effect, LedZone, LedEffect,
+    set_led_effect, turn_off_all_leds, enable_host_mode,
+    LedZone, LedEffect,
 };
 use lghub::{LgHubSettings, macro_engine};
 
@@ -19,8 +20,8 @@ const G435_PID: u16 = 0x0ACB;
 
 fn parse_hex_color(hex: &str) -> Result<(u8, u8, u8), String> {
     let hex = hex.trim_start_matches('#');
-    if hex.len() != 6 {
-        return Err("Color must be a 6-character hex code like FF0055".into());
+    if hex.len() != 6 || !hex.is_ascii() {
+        return Err("Color must be a 6-character ASCII hex code like 00FFCC or FF0055".into());
     }
     let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| "Invalid Red channel")?;
     let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| "Invalid Green channel")?;
@@ -40,7 +41,9 @@ fn open_g502(api: &HidApi) -> Result<HidppDevice, String> {
         .ok_or("G502 HERO not found on HID++ interface")?;
 
     let dev = api.open_path(info.path()).map_err(|e| format!("Failed to open G502: {e}"))?;
-    Ok(HidppDevice::new(dev, 0xFF))
+    let hidpp = HidppDevice::new(dev, 0xFF);
+    let _ = enable_host_mode(&hidpp); // Initialize host mode once
+    Ok(hidpp)
 }
 
 fn print_banner() {
@@ -53,7 +56,7 @@ fn print_help() {
     println!("\nUsage:");
     println!("  ghub_rust                       Launch Desktop GUI");
     println!("  ghub_rust --cli                 Display mouse status in CLI");
-    println!("  ghub_rust --dpi <value>         Set active DPI (e.g. --dpi 800)");
+    println!("  ghub_rust --dpi <value>         Set active DPI (100 - 25600, step 50)");
     println!("  ghub_rust --color <HEX>         Set static RGB color (e.g. --color 00FFCC)");
     println!("  ghub_rust --cycle               Enable spectrum rainbow color cycle");
     println!("  ghub_rust --breathe <HEX>       Enable breathing effect with color");
@@ -61,12 +64,20 @@ fn print_help() {
     println!("  ghub_rust --scan                Scan all Logitech devices & endpoints");
     println!("  ghub_rust --macros              List all profiles and macros from G HUB database");
     println!("  ghub_rust --run-macro <name>    Test play a macro from G HUB (e.g. --run-macro lkm)");
+    println!("  ghub_rust --help                Show this help message");
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Default: Launch GUI!
+    // 1. Check --help first without needing mouse connected!
+    if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
+        print_banner();
+        print_help();
+        return;
+    }
+
+    // 2. Default: Launch GUI!
     if args.len() == 1 || (args.len() > 1 && args[1] == "--gui") {
         ui::run();
         return;
@@ -74,7 +85,7 @@ fn main() {
 
     print_banner();
 
-    // G HUB Macro Inspection command
+    // 3. G HUB Macro Inspection command
     if args.len() > 1 && (args[1] == "--macros" || args[1] == "-m") {
         println!("\n[+] Reading original G HUB settings database...");
         match LgHubSettings::load_from_db() {
@@ -114,8 +125,12 @@ fn main() {
         return;
     }
 
-    // Run Macro command
-    if args.len() > 2 && args[1] == "--run-macro" {
+    // 4. Run Macro command (proper argument check)
+    if args.len() > 1 && args[1] == "--run-macro" {
+        if args.len() < 3 {
+            eprintln!("[-] Error: Missing macro name. Example: ghub_rust --run-macro lkm");
+            return;
+        }
         let macro_name = &args[2];
         println!("\n[*] Looking for macro '{}' in G HUB database...", macro_name);
         match LgHubSettings::load_from_db() {
@@ -216,8 +231,7 @@ fn main() {
             };
             println!("\n[*] Setting {} DPI to {}...", device_name, target);
             match set_dpi(&g502, 0, target) {
-                Ok(_) => {
-                    let confirmed = get_current_dpi(&g502, 0).unwrap_or(target);
+                Ok(confirmed) => {
                     println!("[+] Successfully applied! Active DPI: {}", confirmed);
                 }
                 Err(e) => eprintln!("[-] Failed to set DPI: {e}"),
@@ -236,14 +250,14 @@ fn main() {
                 }
             };
             println!("\n[*] Setting RGB Logo color to #{:02X}{:02X}{:02X} (R: {}, G: {}, B: {})...", r, g, b, r, g, b);
-            match set_led_effect(&g502, LedZone::Logo, LedEffect::Static { r, g, b }) {
+            match set_led_effect(&g502, LedZone::Logo, LedEffect::Static { r, g, b }, false) {
                 Ok(_) => println!("[+] Color applied successfully!"),
                 Err(e) => eprintln!("[-] Failed to set color: {e}"),
             }
         }
         "--cycle" => {
             println!("\n[*] Enabling rainbow color cycle on logo...");
-            match set_led_effect(&g502, LedZone::Logo, LedEffect::ColorCycle { period_ms: 10000, brightness: 255 }) {
+            match set_led_effect(&g502, LedZone::Logo, LedEffect::ColorCycle { period_ms: 10000, brightness: 255 }, false) {
                 Ok(_) => println!("[+] Spectrum cycle active!"),
                 Err(e) => eprintln!("[-] Failed to enable cycle: {e}"),
             }
@@ -261,24 +275,42 @@ fn main() {
                 }
             };
             println!("\n[*] Enabling breathing effect (#{})...", args[2]);
-            match set_led_effect(&g502, LedZone::Logo, LedEffect::Breathing { r, g, b, period_ms: 3000 }) {
+            match set_led_effect(&g502, LedZone::Logo, LedEffect::Breathing { r, g, b, period_ms: 3000 }, false) {
                 Ok(_) => println!("[+] Breathing effect active!"),
                 Err(e) => eprintln!("[-] Failed to set effect: {e}"),
             }
         }
         "--off" => {
             println!("\n[*] Turning off RGB lighting...");
-            match set_led_effect(&g502, LedZone::All, LedEffect::Off) {
+            match turn_off_all_leds(&g502, false) {
                 Ok(_) => println!("[+] LEDs turned off!"),
                 Err(e) => eprintln!("[-] Failed to turn off LEDs: {e}"),
             }
-        }
-        "--help" | "-h" => {
-            print_help();
         }
         other => {
             eprintln!("[-] Unknown option: {other}");
             print_help();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hex_color() {
+        assert_eq!(parse_hex_color("00FFCC"), Ok((0x00, 0xFF, 0xCC)));
+        assert_eq!(parse_hex_color("#FF0055"), Ok((0xFF, 0x00, 0x55)));
+        assert_eq!(parse_hex_color("123456"), Ok((0x12, 0x34, 0x56)));
+
+        // Invalid length
+        assert!(parse_hex_color("FFF").is_err());
+        assert!(parse_hex_color("00FFCCA").is_err());
+
+        // Multibyte characters should not panic
+        assert!(parse_hex_color("日日").is_err());
+        assert!(parse_hex_color("🦀").is_err());
+        assert!(parse_hex_color("GGGGGG").is_err());
     }
 }

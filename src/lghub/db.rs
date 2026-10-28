@@ -1,7 +1,10 @@
 use std::env;
 use std::path::PathBuf;
+use std::time::Duration;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+
+use super::hid_to_vk::hid_usage_to_vk;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LgCard {
@@ -12,25 +15,10 @@ pub struct LgCard {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum LgMacroType {
-    Keystroke,
-    Sequence,
-    Text,
-    Action,
-    Unknown(String),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LgKeystroke {
-    pub code: Option<u32>,
-    pub modifiers: Option<Vec<u32>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LgMacroComponent {
     pub mouse_button: Option<u8>,
     pub mouse_down: Option<bool>,
-    pub key_code: Option<u32>,
+    pub vk_code: Option<u16>,
     pub key_down: Option<bool>,
     pub delay_ms: Option<u64>,
 }
@@ -79,13 +67,22 @@ impl LgHubSettings {
         let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| format!("Failed to open {}: {e}", path.display()))?;
 
+        // Handle possible WAL concurrent write lock with 2s busy timeout
+        conn.busy_timeout(Duration::from_millis(2000))
+            .map_err(|e| format!("Failed to set busy timeout: {e}"))?;
+
         let mut stmt = conn
             .prepare("SELECT file FROM data WHERE _id=1")
             .map_err(|e| format!("Query prepare failed: {e}"))?;
 
-        let blob: Vec<u8> = stmt
+        let mut blob: Vec<u8> = stmt
             .query_row([], |row| row.get(0))
             .map_err(|e| format!("Failed to read settings blob: {e}"))?;
+
+        // Strip trailing NUL bytes if present
+        while blob.last() == Some(&0) {
+            blob.pop();
+        }
 
         let json_str = String::from_utf8(blob).map_err(|e| format!("Blob is not valid UTF-8: {e}"))?;
         let root: serde_json::Value = serde_json::from_str(&json_str)
@@ -107,7 +104,6 @@ impl LgHubSettings {
                     let mut components = Vec::new();
                     let mut is_toggle = false;
 
-                    // Sequence parsing (toggleSequence or simpleSequence or components)
                     if let Some(seq) = m.get("sequence") {
                         if let Some(toggle_seq) = seq.get("toggleSequence").and_then(|ts| ts.get("components")).and_then(|v| v.as_array()) {
                             is_toggle = true;
@@ -120,21 +116,57 @@ impl LgHubSettings {
                             }
                         }
                     } else if let Some(keystroke) = m.get("keystroke") {
-                        if let Some(code) = keystroke.get("code").and_then(|v| v.as_u64()) {
-                            components.push(LgMacroComponent {
-                                mouse_button: None,
-                                mouse_down: None,
-                                key_code: Some(code as u32),
-                                key_down: Some(true),
-                                delay_ms: None,
-                            });
-                            components.push(LgMacroComponent {
-                                mouse_button: None,
-                                mouse_down: None,
-                                key_code: Some(code as u32),
-                                key_down: Some(false),
-                                delay_ms: None,
-                            });
+                        // Keystroke with modifiers: e.g. code: 16 ('M'), modifiers: [227] (LWin)
+                        let hid_code = keystroke.get("code").and_then(|v| v.as_u64()).map(|v| v as u32);
+                        let modifiers = keystroke.get("modifiers")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|c| c as u32)).collect::<Vec<_>>())
+                            .unwrap_or_default();
+
+                        // 1. Modifiers down
+                        for &mod_hid in &modifiers {
+                            if let Some(vk) = hid_usage_to_vk(mod_hid) {
+                                components.push(LgMacroComponent {
+                                    mouse_button: None,
+                                    mouse_down: None,
+                                    vk_code: Some(vk),
+                                    key_down: Some(true),
+                                    delay_ms: None,
+                                });
+                            }
+                        }
+
+                        // 2. Primary key down & up
+                        if let Some(code) = hid_code {
+                            if let Some(vk) = hid_usage_to_vk(code) {
+                                components.push(LgMacroComponent {
+                                    mouse_button: None,
+                                    mouse_down: None,
+                                    vk_code: Some(vk),
+                                    key_down: Some(true),
+                                    delay_ms: Some(10),
+                                });
+                                components.push(LgMacroComponent {
+                                    mouse_button: None,
+                                    mouse_down: None,
+                                    vk_code: Some(vk),
+                                    key_down: Some(false),
+                                    delay_ms: None,
+                                });
+                            }
+                        }
+
+                        // 3. Modifiers up (reverse order)
+                        for &mod_hid in modifiers.iter().rev() {
+                            if let Some(vk) = hid_usage_to_vk(mod_hid) {
+                                components.push(LgMacroComponent {
+                                    mouse_button: None,
+                                    mouse_down: None,
+                                    vk_code: Some(vk),
+                                    key_down: Some(false),
+                                    delay_ms: None,
+                                });
+                            }
                         }
                     }
 
@@ -190,24 +222,57 @@ impl LgHubSettings {
 }
 
 fn parse_component(comp: &serde_json::Value, out: &mut Vec<LgMacroComponent>) {
+    // 1. Mouse component (LKM, PKM, Middle, X1, X2)
     if let Some(mouse) = comp.get("mouse") {
         if let Some(btn) = mouse.get("button") {
-            let hid_usage = btn.get("hidUsage").and_then(|v| v.as_str()).and_then(|s| s.parse::<u8>().ok()).unwrap_or(1);
+            let hid_usage = if let Some(s) = btn.get("hidUsage").and_then(|v| v.as_str()) {
+                s.parse::<u8>().unwrap_or(1)
+            } else if let Some(n) = btn.get("hidUsage").and_then(|v| v.as_u64()) {
+                n as u8
+            } else {
+                1
+            };
+
             let is_down = btn.get("isDown").and_then(|v| v.as_bool()).unwrap_or(false);
             out.push(LgMacroComponent {
                 mouse_button: Some(hid_usage),
                 mouse_down: Some(is_down),
-                key_code: None,
+                vk_code: None,
                 key_down: None,
                 delay_ms: None,
             });
         }
-    } else if let Some(delay) = comp.get("delay") {
+    }
+    // 2. Keyboard component (traxmine, shift, etc.)
+    else if let Some(kb) = comp.get("keyboard") {
+        let hid_usage = if let Some(s) = kb.get("hidUsage").and_then(|v| v.as_str()) {
+            s.parse::<u32>().ok()
+        } else if let Some(n) = kb.get("hidUsage").and_then(|v| v.as_u64()) {
+            Some(n as u32)
+        } else {
+            None
+        };
+
+        if let Some(hid) = hid_usage {
+            if let Some(vk) = hid_usage_to_vk(hid) {
+                let is_down = kb.get("isDown").and_then(|v| v.as_bool()).unwrap_or(false);
+                out.push(LgMacroComponent {
+                    mouse_button: None,
+                    mouse_down: None,
+                    vk_code: Some(vk),
+                    key_down: Some(is_down),
+                    delay_ms: None,
+                });
+            }
+        }
+    }
+    // 3. Delay component
+    else if let Some(delay) = comp.get("delay") {
         let ms = delay.get("durationMs").and_then(|v| v.as_u64()).unwrap_or(1);
         out.push(LgMacroComponent {
             mouse_button: None,
             mouse_down: None,
-            key_code: None,
+            vk_code: None,
             key_down: None,
             delay_ms: Some(ms),
         });

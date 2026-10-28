@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use hidapi::HidDevice;
 use super::packet::HidppPacket;
 
@@ -7,6 +9,7 @@ pub struct HidppDevice {
     device: Mutex<HidDevice>,
     feature_cache: Mutex<HashMap<u16, u8>>,
     device_idx: u8,
+    sw_id_counter: AtomicU8,
 }
 
 impl HidppDevice {
@@ -15,58 +18,85 @@ impl HidppDevice {
             device: Mutex::new(device),
             feature_cache: Mutex::new(HashMap::new()),
             device_idx,
+            sw_id_counter: AtomicU8::new(1),
         }
     }
 
-    pub fn send_request(&self, packet: &HidppPacket) -> Result<HidppPacket, String> {
-        let dev = self.device.lock().map_err(|e| e.to_string())?;
+    fn next_sw_id(&self) -> u8 {
+        let prev = self.sw_id_counter.fetch_add(1, Ordering::SeqCst);
+        (prev % 14) + 1 // IDs 1..=14 (avoiding 0 and 15 which G HUB often uses)
+    }
+
+    /// Sends a request and waits for the specific matching response (discarding notifications / alien packets).
+    pub fn send_request(&self, packet: &HidppPacket, timeout: Duration) -> Result<HidppPacket, String> {
+        let dev = self.device.lock().unwrap_or_else(|e| e.into_inner());
         let bytes = packet.to_bytes();
 
         dev.write(&bytes).map_err(|e| format!("HID write error: {e}"))?;
 
+        let deadline = Instant::now() + timeout;
         let mut buf = [0u8; 64];
-        let n = dev.read_timeout(&mut buf, 1000).map_err(|e| format!("HID read error: {e}"))?;
-        if n == 0 {
-            return Err("HID response timeout".into());
+
+        while Instant::now() < deadline {
+            let remaining_ms = deadline.saturating_duration_since(Instant::now()).as_millis() as i32;
+            let read_timeout = remaining_ms.clamp(10, 200);
+
+            let n = match dev.read_timeout(&mut buf, read_timeout) {
+                Ok(n) if n > 0 => n,
+                Ok(_) => continue, // No packet within poll slice, continue until deadline
+                Err(e) => return Err(format!("HID read error: {e}")),
+            };
+
+            let incoming = match HidppPacket::from_bytes(&buf[..n]) {
+                Ok(pkt) => pkt,
+                Err(_) => continue, // Skip malformed reports
+            };
+
+            // Check if this packet is the response to our request
+            if incoming.is_response_to(packet) {
+                incoming.check_error()?;
+                return Ok(incoming);
+            } else {
+                // Asynchronous notification or alien response from G HUB -> ignore and keep waiting
+            }
         }
 
-        // HID++ 2.0 error packet format: [0x11, dev_idx, 0xFF, orig_feature, orig_func, error_code, ...]
-        if buf[2] == 0xFF {
-            let orig_feature = buf[3];
-            let orig_func = buf[4];
-            let err_code = buf[5];
-            return Err(format!(
-                "HID++ Error: Feature 0x{:02X}, Func 0x{:02X}, ErrorCode 0x{:02X}",
-                orig_feature, orig_func, err_code
-            ));
-        }
-
-        HidppPacket::from_bytes(&buf[..n])
+        Err(format!(
+            "HID response timeout waiting for Feature=0x{:02X}, Func=0x{:X}",
+            packet.feature_idx, packet.function_id
+        ))
     }
 
     pub fn call_function(&self, feature_idx: u8, function_id: u8, params: &[u8]) -> Result<HidppPacket, String> {
-        let req = HidppPacket::new_long(self.device_idx, feature_idx, function_id, 0x01, params);
-        self.send_request(&req)
+        let sw_id = self.next_sw_id();
+        let req = HidppPacket::new_long(self.device_idx, feature_idx, function_id, sw_id, params)?;
+        self.send_request(&req, Duration::from_millis(800))
     }
 
     pub fn get_feature_index(&self, feature_id: u16) -> Result<u8, String> {
-        let mut cache = self.feature_cache.lock().map_err(|e| e.to_string())?;
-        if let Some(&idx) = cache.get(&feature_id) {
-            return Ok(idx);
+        // 1. Check cache first without holding lock during I/O
+        {
+            let cache = self.feature_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(&idx) = cache.get(&feature_id) {
+                return Ok(idx);
+            }
         }
 
-        // Root feature (0x0000) is always index 0x00
-        // Function 0: getFeature(feature_id)
+        // 2. Query Root feature (0x0000, always index 0x00) -> Function 0: getFeature(feature_id)
         let params = [(feature_id >> 8) as u8, (feature_id & 0xFF) as u8];
-        let req = HidppPacket::new_long(self.device_idx, 0x00, 0x00, 0x01, &params);
-        let resp = self.send_request(&req)?;
+        let resp = self.call_function(0x00, 0x00, &params)?;
 
-        let idx = resp.params[0];
+        let idx = resp.params.first().copied().ok_or("Malformed Root feature response: empty params")?;
         if idx == 0 {
             return Err(format!("Feature 0x{:04X} not supported by device", feature_id));
         }
 
-        cache.insert(feature_id, idx);
+        // 3. Store in cache
+        {
+            let mut cache = self.feature_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(feature_id, idx);
+        }
+
         Ok(idx)
     }
 }

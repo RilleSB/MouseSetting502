@@ -1,12 +1,15 @@
 use std::rc::Rc;
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use hidapi::HidApi;
 use slint::{ModelRc, VecModel};
 
 use crate::hidpp::HidppDevice;
 use crate::hidpp::features::{
     get_device_name, get_current_dpi, set_dpi,
-    set_led_effect, LedZone, LedEffect,
+    set_led_effect, turn_off_all_leds, enable_host_mode,
+    LedZone, LedEffect,
 };
 use crate::lghub::{LgHubSettings, macro_engine};
 
@@ -26,12 +29,13 @@ slint::slint! {
         default-font-family: "Segoe UI";
 
         in-out property <int> active_tab: 0;
-        in-out property <string> device_name: "G502 HERO Gaming Mouse";
+        in-out property <string> device_name: "Поиск устройства...";
+        in-out property <bool> device_connected: false;
         in-out property <int> current_dpi: 800;
-        in-out property <string> status_msg: "Подключено";
+        in-out property <string> status_msg: "Инициализация...";
         in-out property <color> current_color: #00e5ff;
         in-out property <string> active_macro_name: "";
-        in-out property <[string]> macro_list: ["lkm", "pkm", "traxmine", "ad", "rgp", "snayp"];
+        in-out property <[string]> macro_list: [];
 
         callback set_dpi(int);
         callback set_rgb_static(int, int, int);
@@ -39,6 +43,7 @@ slint::slint! {
         callback set_rgb_breathe(int, int, int);
         callback set_rgb_off();
         callback toggle_macro(string);
+        callback stop_all_macros();
 
         VerticalLayout {
             padding: 0px;
@@ -84,7 +89,7 @@ slint::slint! {
                             width: 10px;
                             height: 10px;
                             border-radius: 5px;
-                            background: #00e676;
+                            background: root.device_connected ? #00e676 : #ff3d00;
                             y: 25px;
                         }
 
@@ -92,7 +97,7 @@ slint::slint! {
                             text: root.device_name;
                             font-size: 13px;
                             font-weight: 600;
-                            color: #e0e6ed;
+                            color: root.device_connected ? #e0e6ed : #8a96a8;
                             vertical-alignment: center;
                         }
 
@@ -108,7 +113,7 @@ slint::slint! {
                                 padding-left: 10px;
                                 padding-right: 10px;
                                 Text {
-                                    text: "RAM: ~12 MB";
+                                    text: "RAM: ~18 MB";
                                     font-size: 11px;
                                     color: #00e5ff;
                                     font-weight: 600;
@@ -317,7 +322,7 @@ slint::slint! {
                             spacing: 20px;
 
                             Text {
-                                text: "Управление подсветкой LIGHTSYNC (Зона 1: Логотип G)";
+                                text: "Управление подсветкой LIGHTSYNC (Логотип G)";
                                 font-size: 18px;
                                 font-weight: 700;
                                 color: #ffffff;
@@ -436,52 +441,76 @@ slint::slint! {
                         if root.active_tab == 2 : VerticalLayout {
                             spacing: 16px;
 
-                            Text {
-                                text: "Макросы из базы Logitech G HUB";
-                                font-size: 18px;
-                                font-weight: 700;
-                                color: #ffffff;
-                            }
-
-                            Text {
-                                text: "Привязка на мыши: G9 -> 'lkm' (Автокликер ЛКМ), G6 Снайпер -> 'pkm' (Автокликер ПКМ)";
-                                font-size: 12px;
-                                color: #00e5ff;
-                            }
-
                             HorizontalLayout {
-                                spacing: 12px;
-
-                                for name in root.macro_list : Rectangle {
-                                    height: 54px;
-                                    border-radius: 6px;
-                                    background: root.active_macro_name == name ? #00e5ff : #161920;
-                                    border-width: 1px;
-                                    border-color: root.active_macro_name == name ? #00e5ff : #242a36;
-
+                                alignment: space-between;
+                                Text {
+                                    text: "Макросы из базы Logitech G HUB";
+                                    font-size: 18px;
+                                    font-weight: 700;
+                                    color: #ffffff;
+                                }
+                                if root.active_macro_name != "" : Rectangle {
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: #ff1744;
                                     HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
+                                        padding-left: 10px; padding-right: 10px;
+                                        Text {
+                                            text: "⛔ ОСТАНОВИТЬ ВСЕ МАКРОСЫ";
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            color: #fff;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    TouchArea {
+                                        clicked => { root.stop_all_macros(); }
+                                    }
+                                }
+                            }
 
-                                        VerticalLayout {
-                                            alignment: center;
+                            Text {
+                                text: "Нажмите на макрос для включения/выключения автокликера:";
+                                font-size: 12px;
+                                color: #8a96a8;
+                            }
+
+                            ScrollView {
+                                height: 260px;
+                                VerticalLayout {
+                                    spacing: 8px;
+                                    for name in root.macro_list : Rectangle {
+                                        height: 46px;
+                                        border-radius: 6px;
+                                        background: root.active_macro_name == name ? #00e5ff : #161920;
+                                        border-width: 1px;
+                                        border-color: root.active_macro_name == name ? #00e5ff : #242a36;
+
+                                        HorizontalLayout {
+                                            padding-left: 16px;
+                                            padding-right: 16px;
+                                            alignment: space-between;
+
                                             Text {
                                                 text: name;
                                                 font-size: 14px;
                                                 font-weight: 700;
                                                 color: root.active_macro_name == name ? #000000 : #ffffff;
+                                                vertical-alignment: center;
                                             }
+
                                             Text {
-                                                text: root.active_macro_name == name ? "РАБОТАЕТ" : "Нажмите для теста";
-                                                font-size: 10px;
-                                                color: root.active_macro_name == name ? #003344 : #6c788c;
+                                                text: root.active_macro_name == name ? "🟢 АКТИВЕН" : "Нажмите для запуска";
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                color: root.active_macro_name == name ? #003344 : #5f6d80;
+                                                vertical-alignment: center;
                                             }
                                         }
-                                    }
-                                    TouchArea {
-                                        clicked => {
-                                            root.toggle_macro(name);
+                                        TouchArea {
+                                            clicked => {
+                                                root.toggle_macro(name);
+                                            }
                                         }
                                     }
                                 }
@@ -509,7 +538,7 @@ slint::slint! {
                     }
 
                     Text {
-                        text: "Logitech HID++ 2.0 Direct Native Driver";
+                        text: "Logitech HID++ 2.0 Native Worker";
                         font-size: 11px;
                         color: #434c59;
                         vertical-alignment: center;
@@ -520,136 +549,237 @@ slint::slint! {
     }
 }
 
+enum DeviceCommand {
+    SetDpi(u16),
+    SetRgbStatic(u8, u8, u8),
+    SetRgbCycle,
+    SetRgbBreathe(u8, u8, u8),
+    SetRgbOff,
+}
+
 pub fn run() {
     let app = MainWindow::new().expect("Failed to create MainWindow");
 
-    let api = HidApi::new().expect("Failed to initialize HID");
-    let info = api
-        .device_list()
-        .find(|d| d.vendor_id() == LOGITECH_VID && d.product_id() == G502_PID && d.usage_page() == 0xFF00 && d.usage() == 0x0002);
+    // Preload G HUB settings once at startup into memory
+    let lghub_settings = Arc::new(LgHubSettings::load_from_db().ok());
 
-    let dev_arc: Option<Arc<HidppDevice>> = if let Some(i) = info {
-        if let Ok(dev) = api.open_path(i.path()) {
-            let hidpp = Arc::new(HidppDevice::new(dev, 0xFF));
-            if let Ok(name) = get_device_name(&hidpp) {
-                app.set_device_name(name.into());
-            }
-            if let Ok(dpi) = get_current_dpi(&hidpp, 0) {
-                app.set_current_dpi(dpi as i32);
-            }
-            Some(hidpp)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Load macros from G HUB database
-    let lghub_data = LgHubSettings::load_from_db().ok();
-    if let Some(ref data) = lghub_data {
-        let mut names: Vec<slint::SharedString> = Vec::new();
+    // Dynamically populate all unique custom macros from G HUB
+    if let Some(ref data) = *lghub_settings {
+        let mut macro_names = Vec::new();
         for card in &data.cards {
             if let Some(m) = &card.macro_data {
-                if m.is_toggle || m.name == "lkm" || m.name == "pkm" || m.name == "traxmine" || m.name == "ad" {
-                    names.push(m.name.clone().into());
+                if !macro_names.contains(&m.name) {
+                    macro_names.push(m.name.clone());
                 }
             }
         }
-        if !names.is_empty() {
-            let model = Rc::new(VecModel::from(names));
-            app.set_macro_list(ModelRc::from(model));
-        }
+        let slint_names: Vec<slint::SharedString> = macro_names.into_iter().map(|s| s.into()).collect();
+        let model = Rc::new(VecModel::from(slint_names));
+        app.set_macro_list(ModelRc::from(model));
     }
 
-    // Callbacks
-    let dev_dpi = dev_arc.clone();
-    let app_weak = app.as_weak();
-    app.on_set_dpi(move |target| {
-        if let Some(ref dev) = dev_dpi {
-            let _ = set_dpi(dev, 0, target as u16);
-            if let Some(app) = app_weak.upgrade() {
-                app.set_current_dpi(target);
-                app.set_status_msg(format!("Установлен DPI: {}", target).into());
-            }
-        }
+    // Try opening device
+    let api = HidApi::new().ok();
+    let dev_info = api.as_ref().and_then(|a| {
+        a.device_list()
+            .find(|d| d.vendor_id() == LOGITECH_VID && d.product_id() == G502_PID && d.usage_page() == 0xFF00 && d.usage() == 0x0002)
     });
 
-    let dev_rgb = dev_arc.clone();
-    let app_weak = app.as_weak();
-    app.on_set_rgb_static(move |r, g, b| {
-        if let Some(ref dev) = dev_rgb {
-            let _ = set_led_effect(dev, LedZone::Logo, LedEffect::Static { r: r as u8, g: g as u8, b: b as u8 });
-            if let Some(app) = app_weak.upgrade() {
-                app.set_status_msg(format!("Цвет установлен: RGB({}, {}, {})", r, g, b).into());
-            }
-        }
-    });
+    let (cmd_tx, cmd_rx) = channel::<DeviceCommand>();
 
-    let dev_cycle = dev_arc.clone();
-    let app_weak = app.as_weak();
-    app.on_set_rgb_cycle(move || {
-        if let Some(ref dev) = dev_cycle {
-            let _ = set_led_effect(dev, LedZone::Logo, LedEffect::ColorCycle { period_ms: 10000, brightness: 255 });
-            if let Some(app) = app_weak.upgrade() {
-                app.set_status_msg("Включен радужный спектральный цикл".into());
-            }
-        }
-    });
+    if let (Some(api_ref), Some(info)) = (api.as_ref(), dev_info) {
+        match api_ref.open_path(info.path()) {
+            Ok(dev) => {
+                let hidpp = Arc::new(HidppDevice::new(dev, 0xFF));
+                let _ = enable_host_mode(&hidpp); // Call once on connect
 
-    let dev_breathe = dev_arc.clone();
-    let app_weak = app.as_weak();
-    app.on_set_rgb_breathe(move |r, g, b| {
-        if let Some(ref dev) = dev_breathe {
-            let _ = set_led_effect(dev, LedZone::Logo, LedEffect::Breathing { r: r as u8, g: g as u8, b: b as u8, period_ms: 3000 });
-            if let Some(app) = app_weak.upgrade() {
-                app.set_status_msg("Включен режим пульсации (дыхание)".into());
-            }
-        }
-    });
+                if let Ok(name) = get_device_name(&hidpp) {
+                    app.set_device_name(name.into());
+                }
+                app.set_device_connected(true);
+                app.set_status_msg("Устройство подключено и готово к работе".into());
 
-    let dev_off = dev_arc.clone();
-    let app_weak = app.as_weak();
-    app.on_set_rgb_off(move || {
-        if let Some(ref dev) = dev_off {
-            let _ = set_led_effect(dev, LedZone::All, LedEffect::Off);
-            if let Some(app) = app_weak.upgrade() {
-                app.set_status_msg("Подсветка выключена".into());
-            }
-        }
-    });
+                if let Ok(dpi) = get_current_dpi(&hidpp, 0) {
+                    app.set_current_dpi(dpi as i32);
+                }
 
-    // Toggle active macro
-    let active_macro_slot: Arc<Mutex<Option<macro_engine::ActiveMacro>>> = Arc::new(Mutex::new(None));
-    let slot_clone = active_macro_slot.clone();
-    let app_weak = app.as_weak();
-    app.on_toggle_macro(move |name| {
-        let mut slot = slot_clone.lock().unwrap();
-        if let Some(active) = slot.take() {
-            active.stop();
-            if let Some(app) = app_weak.upgrade() {
-                app.set_active_macro_name("".into());
-                app.set_status_msg("Макрос остановлен".into());
-            }
-        } else {
-            if let Ok(settings) = LgHubSettings::load_from_db() {
-                let target = settings.cards.iter().find(|c| {
-                    name == c.name.as_deref().unwrap_or("")
-                        || name == c.macro_data.as_ref().map(|m| m.name.as_str()).unwrap_or("")
-                });
-                if let Some(card) = target {
-                    if let Some(m) = &card.macro_data {
-                        let active = macro_engine::start_macro_loop(m.clone());
-                        *slot = Some(active);
-                        if let Some(app) = app_weak.upgrade() {
-                            app.set_active_macro_name(name.clone());
-                            app.set_status_msg(format!("Запущен макрос '{}' (автокликер)", name).into());
+                // Dedicated background worker for HID I/O to NEVER freeze the UI
+                let hid_worker = hidpp.clone();
+                let app_weak = app.as_weak();
+                thread::spawn(move || {
+                    while let Ok(cmd) = cmd_rx.recv() {
+                        match cmd {
+                            DeviceCommand::SetDpi(dpi) => {
+                                let res = set_dpi(&hid_worker, 0, dpi);
+                                let weak = app_weak.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = weak.upgrade() {
+                                        match res {
+                                            Ok(confirmed) => {
+                                                app.set_current_dpi(confirmed as i32);
+                                                app.set_status_msg(format!("Установлен DPI: {}", confirmed).into());
+                                            }
+                                            Err(e) => {
+                                                app.set_status_msg(format!("Ошибка установки DPI: {}", e).into());
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            DeviceCommand::SetRgbStatic(r, g, b) => {
+                                let res = set_led_effect(&hid_worker, LedZone::Logo, LedEffect::Static { r, g, b }, false);
+                                let weak = app_weak.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = weak.upgrade() {
+                                        match res {
+                                            Ok(_) => app.set_status_msg(format!("Цвет установлен: RGB({}, {}, {})", r, g, b).into()),
+                                            Err(e) => app.set_status_msg(format!("Ошибка RGB: {}", e).into()),
+                                        }
+                                    }
+                                });
+                            }
+                            DeviceCommand::SetRgbCycle => {
+                                let res = set_led_effect(&hid_worker, LedZone::Logo, LedEffect::ColorCycle { period_ms: 10000, brightness: 255 }, false);
+                                let weak = app_weak.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = weak.upgrade() {
+                                        match res {
+                                            Ok(_) => app.set_status_msg("Включен спектральный цикл".into()),
+                                            Err(e) => app.set_status_msg(format!("Ошибка RGB: {}", e).into()),
+                                        }
+                                    }
+                                });
+                            }
+                            DeviceCommand::SetRgbBreathe(r, g, b) => {
+                                let res = set_led_effect(&hid_worker, LedZone::Logo, LedEffect::Breathing { r, g, b, period_ms: 3000 }, false);
+                                let weak = app_weak.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = weak.upgrade() {
+                                        match res {
+                                            Ok(_) => app.set_status_msg("Включен режим пульсации".into()),
+                                            Err(e) => app.set_status_msg(format!("Ошибка RGB: {}", e).into()),
+                                        }
+                                    }
+                                });
+                            }
+                            DeviceCommand::SetRgbOff => {
+                                let res = turn_off_all_leds(&hid_worker, false);
+                                let weak = app_weak.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = weak.upgrade() {
+                                        match res {
+                                            Ok(_) => app.set_status_msg("Подсветка выключена".into()),
+                                            Err(e) => app.set_status_msg(format!("Ошибка RGB: {}", e).into()),
+                                        }
+                                    }
+                                });
+                            }
                         }
                     }
+                });
+            }
+            Err(e) => {
+                app.set_device_connected(false);
+                app.set_device_name("Ошибка доступа к мыши".into());
+                app.set_status_msg(format!("Не удалось открыть устройство: {}", e).into());
+            }
+        }
+    } else {
+        app.set_device_connected(false);
+        app.set_device_name("Устройство не найдено".into());
+        app.set_status_msg("Мышь Logitech G502 HERO не обнаружена".into());
+    }
+
+    // Callbacks to worker channel
+    let tx = cmd_tx.clone();
+    app.on_set_dpi(move |target| {
+        let _ = tx.send(DeviceCommand::SetDpi(target as u16));
+    });
+
+    let tx = cmd_tx.clone();
+    app.on_set_rgb_static(move |r, g, b| {
+        let _ = tx.send(DeviceCommand::SetRgbStatic(r as u8, g as u8, b as u8));
+    });
+
+    let tx = cmd_tx.clone();
+    app.on_set_rgb_cycle(move || {
+        let _ = tx.send(DeviceCommand::SetRgbCycle);
+    });
+
+    let tx = cmd_tx.clone();
+    app.on_set_rgb_breathe(move |r, g, b| {
+        let _ = tx.send(DeviceCommand::SetRgbBreathe(r as u8, g as u8, b as u8));
+    });
+
+    let tx = cmd_tx.clone();
+    app.on_set_rgb_off(move || {
+        let _ = tx.send(DeviceCommand::SetRgbOff);
+    });
+
+    // Macro execution controller with proper state and switching
+    let active_macro: Arc<Mutex<Option<(String, macro_engine::ActiveMacro)>>> = Arc::new(Mutex::new(None));
+
+    let macro_slot = active_macro.clone();
+    let app_weak = app.as_weak();
+    app.on_stop_all_macros(move || {
+        let mut slot = macro_slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, active)) = slot.take() {
+            active.stop();
+        }
+        if let Some(app) = app_weak.upgrade() {
+            app.set_active_macro_name("".into());
+            app.set_status_msg("Все макросы остановлены".into());
+        }
+    });
+
+    let macro_slot = active_macro.clone();
+    let settings_arc = lghub_settings.clone();
+    let app_weak = app.as_weak();
+    app.on_toggle_macro(move |name| {
+        let mut slot = macro_slot.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Check if currently running the same macro -> stop it
+        if let Some((active_name, active)) = slot.take() {
+            active.stop();
+            if active_name == name.as_str() {
+                if let Some(app) = app_weak.upgrade() {
+                    app.set_active_macro_name("".into());
+                    app.set_status_msg(format!("Макрос '{}' остановлен", name).into());
+                }
+                return;
+            }
+        }
+
+        // Switching to new macro
+        if let Some(ref data) = *settings_arc {
+            let target = data.cards.iter().find(|c| {
+                name == c.name.as_deref().unwrap_or("")
+                    || name == c.macro_data.as_ref().map(|m| m.name.as_str()).unwrap_or("")
+            });
+
+            if let Some(card) = target {
+                if let Some(m) = &card.macro_data {
+                    let active = macro_engine::start_macro_loop(m.clone());
+                    *slot = Some((name.to_string(), active));
+                    if let Some(app) = app_weak.upgrade() {
+                        app.set_active_macro_name(name.clone());
+                        app.set_status_msg(format!("Запущен макрос '{}' (автокликер)", name).into());
+                    }
+                    return;
                 }
             }
+        }
+
+        if let Some(app) = app_weak.upgrade() {
+            app.set_status_msg(format!("Макрос '{}' не найден в базе данных", name).into());
         }
     });
 
     app.run().expect("Failed to run Slint application");
+
+    // Clean up any running macros on window close
+    let mut slot = active_macro.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, active)) = slot.take() {
+        active.stop();
+    }
 }
