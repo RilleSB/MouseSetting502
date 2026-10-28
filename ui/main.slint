@@ -167,7 +167,7 @@ export struct QuickKeyItem {
                     // Brand / Logo
                     HorizontalLayout {
                         spacing: 14px;
-                        alignment: start;
+                        alignment: center;
 
                         Rectangle {
                             width: 36px;
@@ -176,7 +176,6 @@ export struct QuickKeyItem {
                             background: Theme.accent_subtle;
                             border-width: 1px;
                             border-color: Theme.accent_border;
-                            y: 14px;
 
                             Text {
                                 text: "⯛ G";
@@ -220,109 +219,45 @@ export struct QuickKeyItem {
                     // Device Status Indicators & Metrics
                     HorizontalLayout {
                         spacing: 12px;
-                        alignment: end;
+                        alignment: center;
 
                         // Mouse status pill
-                        Rectangle {
-                            height: 32px;
-                            border-radius: 6px;
-                            background: root.device_connected ? Theme.success_bg : Theme.error_subtle;
-                            border-width: 1px;
-                            border-color: root.device_connected ? Theme.success : Theme.error;
-                            y: 16px;
-
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 12px;
-                                spacing: 8px;
-
-                                Rectangle {
-                                    width: 8px;
-                                    height: 8px;
-                                    border-radius: 4px;
-                                    background: root.device_connected ? Theme.success_dot : Theme.error;
-                                    y: 12px;
-                                }
-
-                                Text {
-                                    text: root.device_connected ? (root.device_name + " • 1000Hz") : "Мышь не обнаружена";
-                                    font-size: 12px;
-                                    font-weight: 600;
-                                    color: root.device_connected ? Theme.text_heading : Theme.error_text;
-                                    vertical-alignment: center;
-                                }
-                            }
+                        Pill {
+                            text: root.device_connected ? (root.device_name + " • 1000Hz") : "Мышь не обнаружена";
+                            text_color: root.device_connected ? Theme.text_heading : Theme.error_text;
+                            bg_col: root.device_connected ? Theme.success_bg : Theme.error_subtle;
+                            border_col: root.device_connected ? Theme.success : Theme.error;
+                            dot_color: root.device_connected ? Theme.success_dot : Theme.error;
+                            show_dot: true;
                         }
 
                         // Headset status pill
-                        Rectangle {
-                            height: 32px;
-                            border-radius: 6px;
-                            background: root.headset_connected ? Theme.headset_bg_connected : Theme.headset_bg_disconnected;
-                            border-width: 1px;
-                            border-color: root.headset_connected ? Theme.accent : Theme.headset_border_disconnected;
-                            y: 16px;
-
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 12px;
-                                spacing: 8px;
-
-                                Text {
-                                    text: root.headset_connected ? "🎧 G435: Подключен" : "🎧 G435: Беспроводной";
-                                    font-size: 12px;
-                                    font-weight: 600;
-                                    color: root.headset_connected ? Theme.accent : Theme.text_inactive;
-                                    vertical-alignment: center;
-                                }
-                            }
+                        Pill {
+                            text: root.headset_connected ? "🎧 G435: Подключен" : "🎧 G435: Беспроводной";
+                            text_color: root.headset_connected ? Theme.accent : Theme.text_inactive;
+                            bg_col: root.headset_connected ? Theme.headset_bg_connected : Theme.headset_bg_disconnected;
+                            border_col: root.headset_connected ? Theme.accent : Theme.headset_border_disconnected;
                         }
 
                         // Low memory consumption badge
-                        Rectangle {
-                            height: 32px;
-                            border-radius: 6px;
-                            background: Theme.card_bg;
-                            border-width: 1px;
-                            border-color: Theme.border_default;
-                            y: 16px;
-
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 10px;
-                                Text {
-                                    text: "RAM: ~14 MB • CPU: 0%";
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    color: Theme.success;
-                                    vertical-alignment: center;
-                                }
-                            }
+                        Pill {
+                            text: "RAM: ~14 MB • CPU: 0%";
+                            text_color: Theme.success;
+                            bg_col: Theme.card_bg;
+                            border_col: Theme.border_default;
+                            font_sz: 11px;
                         }
 
                         // Refresh button
-                        Rectangle {
-                            width: 34px;
-                            height: 32px;
-                            border-radius: 6px;
-                            background: Theme.divider;
-                            border-width: 1px;
-                            border-color: Theme.border_btn;
-                            y: 16px;
-
-                            Text {
-                                text: "🔄";
-                                font-size: 13px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                            TouchArea {
-                                clicked => { root.refresh_devices(); }
-                            }
+                        IconButton {
+                            icon: "🔄";
+                            icon_size: 13px;
+                            clicked => { root.refresh_devices(); }
                         }
                     }
                 }
             }
+                        }
 
             // Divider
             Rectangle {
@@ -420,7 +355,8 @@ export struct QuickKeyItem {
                         // ==========================================
                         // TAB 0: DEVICE OVERVIEW
                         // ==========================================
-                        if root.active_tab == 0 : VerticalLayout {
+                        if root.active_tab == 0 : ScrollView {
+                        VerticalLayout {
                             spacing: 16px;
 
                             Text {
@@ -601,11 +537,13 @@ export struct QuickKeyItem {
                                 }
                             }
                         }
+                        }
 
                         // ==========================================
                         // TAB 1: SENSOR & DPI
                         // ==========================================
-                        if root.active_tab == 1 : VerticalLayout {
+                        if root.active_tab == 1 : ScrollView {
+                        VerticalLayout {
                             spacing: 18px;
 
                             Text {
@@ -744,11 +682,13 @@ export struct QuickKeyItem {
                                 }
                             }
                         }
+                        }
 
                         // ==========================================
                         // TAB 2: RGB LIGHTSYNC
                         // ==========================================
-                        if root.active_tab == 2 : VerticalLayout {
+                        if root.active_tab == 2 : ScrollView {
+                        VerticalLayout {
                             spacing: 18px;
 
                             Text {
@@ -777,7 +717,6 @@ export struct QuickKeyItem {
                                         background: root.current_color;
                                         border-width: 3px;
                                         border-color: Theme.swatch_border_unselected;
-                                        y: 25px;
 
                                         Text {
                                             text: "G";
@@ -855,11 +794,13 @@ export struct QuickKeyItem {
                                 }
                             }
                         }
+                        }
 
                         // ==========================================
                         // TAB 3: MACRO STUDIO
                         // ==========================================
-                        if root.active_tab == 3 : VerticalLayout {
+                        if root.active_tab == 3 : ScrollView {
+                        VerticalLayout {
                             spacing: 14px;
 
                             HorizontalLayout {
@@ -924,8 +865,7 @@ export struct QuickKeyItem {
                             }
 
                             // Macros List
-                            ScrollView {
-                                height: 410px;
+                            VerticalLayout {
 
                                 VerticalLayout {
                                     spacing: 8px;
@@ -944,11 +884,13 @@ export struct QuickKeyItem {
                                 }
                             }
                         }
+                        }
 
                         // ==========================================
                         // TAB 4: KEYBINDS & BUTTON MAPPING (VISUAL G502)
                         // ==========================================
-                        if root.active_tab == 4 : VerticalLayout {
+                        if root.active_tab == 4 : ScrollView {
+                        VerticalLayout {
                             spacing: 12px;
 
                             // Top hook status card
@@ -986,7 +928,6 @@ export struct QuickKeyItem {
                                         background: root.listener_active ? Theme.success : Theme.surface_elevated;
                                         border-width: 1px;
                                         border-color: root.listener_active ? Theme.success : Theme.border_btn;
-                                        y: 15px;
 
                                         HorizontalLayout {
                                             padding-left: 14px; padding-right: 14px;
@@ -1014,8 +955,7 @@ export struct QuickKeyItem {
                             }
 
                             // Scrollable Mappings
-                            ScrollView {
-                                height: 380px;
+                            VerticalLayout {
 
                                 VerticalLayout {
                                     spacing: 8px;
@@ -1077,17 +1017,23 @@ export struct QuickKeyItem {
         // MODAL OVERLAY: MACRO CREATOR & EDITOR
         // ==========================================
         if root.show_macro_builder : Rectangle {
+            width: 100%;
+            height: 100%;
             background: Theme.overlay;
 
             TouchArea { /* block clicks outside modal */ }
 
-            Rectangle {
-                width: 720px;
-                height: 620px;
-                border-radius: 12px;
-                background: Theme.card_bg_subtle;
-                border-width: 1px;
-                border-color: Theme.border_default;
+            HorizontalLayout {
+                alignment: center;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 740px;
+                        height: 620px;
+                        border-radius: 12px;
+                        background: Theme.card_bg_subtle;
+                        border-width: 1px;
+                        border-color: Theme.border_default;
 
                 VerticalLayout {
                     padding: 22px;
@@ -1273,23 +1219,31 @@ export struct QuickKeyItem {
                     }
                 }
             }
+            }
+            }
         }
 
         // ==========================================
         // MODAL OVERLAY: KEYBIND PICKER
         // ==========================================
         if root.show_bind_picker : Rectangle {
+            width: 100%;
+            height: 100%;
             background: Theme.overlay;
 
             TouchArea { /* block clicks outside modal */ }
 
-            Rectangle {
-                width: 540px;
-                height: 500px;
-                border-radius: 12px;
-                background: Theme.card_bg_subtle;
-                border-width: 1px;
-                border-color: Theme.border_default;
+            HorizontalLayout {
+                alignment: center;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 540px;
+                        height: 500px;
+                        border-radius: 12px;
+                        background: Theme.card_bg_subtle;
+                        border-width: 1px;
+                        border-color: Theme.border_default;
 
                 VerticalLayout {
                     padding: 24px;
@@ -1390,4 +1344,6 @@ export struct QuickKeyItem {
                 }
             }
         }
+            }
+            }
     }

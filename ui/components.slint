@@ -38,7 +38,6 @@ export component Pill inherits Rectangle {
             height: 8px;
             border-radius: Theme.radius_sm;
             background: root.dot_color;
-            y: 12px;
         }
 
         Text {
@@ -97,13 +96,13 @@ export component SidebarItem inherits Rectangle {
     HorizontalLayout {
         padding-left: 12px;
         spacing: 12px;
+        alignment: start;
 
         Rectangle {
             width: 3px;
             height: 20px;
             border-radius: Theme.radius_xs;
             background: root.active ? Theme.accent : transparent;
-            y: 13px;
         }
 
         Text {
@@ -127,19 +126,25 @@ export component Modal inherits Rectangle {
     in property <string> subtitle: "";
     callback close();
 
+    width: 100%;
+    height: 100%;
     background: Theme.overlay;
 
     TouchArea {
         // Blocks clicks outside modal content
     }
 
-    Rectangle {
-        width: root.modal_width;
-        height: root.modal_height;
-        border-radius: Theme.radius_lg;
-        background: Theme.card_bg_subtle;
-        border-width: 1px;
-        border-color: Theme.border_default;
+    HorizontalLayout {
+        alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: root.modal_width;
+                height: root.modal_height;
+                border-radius: Theme.radius_lg;
+                background: Theme.card_bg_subtle;
+                border-width: 1px;
+                border-color: Theme.border_default;
 
         VerticalLayout {
             padding: 24px;
@@ -151,6 +156,7 @@ export component Modal inherits Rectangle {
 
                 VerticalLayout {
                     spacing: 4px;
+                    alignment: center;
                     Text {
                         text: root.title;
                         font-size: Theme.font_title;
@@ -177,6 +183,8 @@ export component Modal inherits Rectangle {
             }
 
             @children
+        }
+            }
         }
     }
 }
@@ -219,11 +227,13 @@ export component MacroRow inherits Rectangle {
 
                 HorizontalLayout {
                     spacing: 8px;
+                    alignment: center;
                     Text {
                         text: root.name;
                         font-size: Theme.font_md;
                         font-weight: 800;
                         color: Theme.text_primary;
+                        vertical-alignment: center;
                     }
                     Rectangle {
                         height: 18px;
@@ -231,6 +241,7 @@ export component MacroRow inherits Rectangle {
                         background: root.is_custom ? Theme.badge_custom_bg : Theme.surface_alt;
                         HorizontalLayout {
                             padding-left: 6px; padding-right: 6px;
+                            alignment: center;
                             Text {
                                 text: root.is_custom ? "ПОЛЬЗОВАТЕЛЬСКИЙ" : "G HUB";
                                 font-size: Theme.font_xs;
@@ -246,6 +257,7 @@ export component MacroRow inherits Rectangle {
                         background: root.is_toggle ? Theme.warning_subtle : Theme.accent_teal;
                         HorizontalLayout {
                             padding-left: 6px; padding-right: 6px;
+                            alignment: center;
                             Text {
                                 text: root.is_toggle ? "АВТОКЛИКЕР (TOGGLE)" : "СЕКВЕНЦИЯ";
                                 font-size: Theme.font_xs;
@@ -267,7 +279,7 @@ export component MacroRow inherits Rectangle {
 
         HorizontalLayout {
             spacing: 8px;
-            alignment: end;
+            alignment: center;
 
             // Run/Toggle Button
             Rectangle {
@@ -276,10 +288,10 @@ export component MacroRow inherits Rectangle {
                 background: root.is_active ? Theme.accent : Theme.surface_active;
                 border-width: 1px;
                 border-color: root.is_active ? Theme.accent : Theme.border_light;
-                y: 13px;
 
                 HorizontalLayout {
                     padding-left: 12px; padding-right: 12px;
+                    alignment: center;
                     Text {
                         text: root.is_active ? "⏸ ОСТАНОВИТЬ" : "▶ ЗАПУСТИТЬ";
                         font-size: Theme.font_caption;
@@ -298,7 +310,6 @@ export component MacroRow inherits Rectangle {
                 background: Theme.surface_active;
                 border-width: 1px;
                 border-color: Theme.border_light;
-                y: 13px;
                 Text { text: "✏️"; font-size: Theme.font_caption; horizontal-alignment: center; vertical-alignment: center; }
                 TouchArea { clicked => { root.edit(); } }
             }
@@ -310,7 +321,6 @@ export component MacroRow inherits Rectangle {
                 background: Theme.error_btn_bg;
                 border-width: 1px;
                 border-color: Theme.error_border;
-                y: 13px;
                 Text { text: "🗑️"; font-size: Theme.font_caption; horizontal-alignment: center; vertical-alignment: center; }
                 TouchArea { clicked => { root.delete(); } }
             }
@@ -330,7 +340,9 @@ export component StepRow inherits Rectangle {
     background: Theme.surface_step;
 
     HorizontalLayout {
-        padding-left: 10px; padding-right: 10px; alignment: space-between;
+        padding-left: 10px; padding-right: 10px;
+        alignment: space-between;
+
         Text {
             text: "#" + (root.idx + 1) + "  " + root.step_text;
             font-size: Theme.font_caption;
@@ -340,24 +352,25 @@ export component StepRow inherits Rectangle {
 
         HorizontalLayout {
             spacing: 6px;
+            alignment: center;
 
             // Move up
             Rectangle {
-                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.step_btn_bg; y: 4px;
+                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.step_btn_bg;
                 Text { text: "▲"; font-size: Theme.font_xs; font-weight: 800; color: Theme.text_secondary; horizontal-alignment: center; vertical-alignment: center; }
                 TouchArea { clicked => { root.move_up(); } }
             }
 
             // Move down
             Rectangle {
-                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.step_btn_bg; y: 4px;
+                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.step_btn_bg;
                 Text { text: "▼"; font-size: Theme.font_xs; font-weight: 800; color: Theme.text_secondary; horizontal-alignment: center; vertical-alignment: center; }
                 TouchArea { clicked => { root.move_down(); } }
             }
 
             // Delete
             Rectangle {
-                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.error_btn_bg; y: 4px;
+                width: 20px; height: 20px; border-radius: Theme.radius_xs; background: Theme.error_btn_bg;
                 Text { text: "✕"; font-size: Theme.font_sm; font-weight: 800; color: Theme.error_bright; horizontal-alignment: center; vertical-alignment: center; }
                 TouchArea { clicked => { root.remove(); } }
             }
@@ -397,7 +410,6 @@ export component KeybindRow inherits Rectangle {
                 background: root.is_mouse ? Theme.accent_light : Theme.purple_subtle;
                 border-width: 1px;
                 border-color: root.is_mouse ? Theme.accent_border : Theme.purple_border;
-                y: 11px;
 
                 Text {
                     text: root.button_id;
@@ -429,7 +441,7 @@ export component KeybindRow inherits Rectangle {
 
         HorizontalLayout {
             spacing: 8px;
-            alignment: end;
+            alignment: center;
 
             // Assign button
             Rectangle {
@@ -438,10 +450,10 @@ export component KeybindRow inherits Rectangle {
                 background: Theme.surface_btn;
                 border-width: 1px;
                 border-color: Theme.border_btn_hover;
-                y: 10px;
 
                 HorizontalLayout {
                     padding-left: 12px; padding-right: 12px;
+                    alignment: center;
                     Text {
                         text: root.assigned_macro != "" ? "ИЗМЕНИТЬ" : "НАЗНАЧИТЬ МАКРОС";
                         font-size: Theme.font_caption;
@@ -460,7 +472,6 @@ export component KeybindRow inherits Rectangle {
                 background: Theme.error_btn_bg;
                 border-width: 1px;
                 border-color: Theme.error_border;
-                y: 10px;
                 Text { text: "↺"; font-size: Theme.font_md; font-weight: 800; color: Theme.error_bright; horizontal-alignment: center; vertical-alignment: center; }
                 TouchArea { clicked => { root.clear(); } }
             }
@@ -498,6 +509,7 @@ export component QuickKeyButton inherits Rectangle {
 
     HorizontalLayout {
         padding-left: 12px; padding-right: 12px;
+        alignment: center;
         Text {
             text: root.label;
             font-size: Theme.font_caption;
@@ -525,6 +537,7 @@ export component QuickDelayButton inherits Rectangle {
 
     HorizontalLayout {
         padding-left: 10px; padding-right: 10px;
+        alignment: center;
         Text {
             text: "+" + root.delay_ms + "мс";
             font-size: Theme.font_caption;
