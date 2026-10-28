@@ -276,8 +276,23 @@ fn check_and_dispatch_button(btn_id: &str) -> bool {
     if let Some(state) = guard.as_ref() {
         let macro_name = {
             if let Ok(binds) = state.bindings.read() {
-                binds.iter().find(|b| b.button_id == btn_id && !b.assigned_macro.trim().is_empty())
-                    .map(|b| b.assigned_macro.clone())
+                if let Some(b) = binds.iter().find(|b| b.button_id == btn_id) {
+                    if !b.assigned_macro.trim().is_empty() {
+                        Some(b.assigned_macro.clone())
+                    } else if btn_id == "G7" {
+                        Some("__DPI_DOWN__".to_string())
+                    } else if btn_id == "G8" {
+                        Some("__DPI_UP__".to_string())
+                    } else {
+                        None
+                    }
+                } else if btn_id == "G7" {
+                    Some("__DPI_DOWN__".to_string())
+                } else if btn_id == "G8" {
+                    Some("__DPI_UP__".to_string())
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -307,8 +322,23 @@ fn check_and_dispatch_vk(vk: u16) -> bool {
     if let Some(state) = guard.as_ref() {
         let macro_name = {
             if let Ok(binds) = state.bindings.read() {
-                binds.iter().find(|b| b.vk_code == vk && !b.assigned_macro.trim().is_empty())
-                    .map(|b| b.assigned_macro.clone())
+                if let Some(b) = binds.iter().find(|b| b.vk_code == vk) {
+                    if !b.assigned_macro.trim().is_empty() {
+                        Some(b.assigned_macro.clone())
+                    } else if b.button_id == "G7" || vk == 0x7D {
+                        Some("__DPI_DOWN__".to_string())
+                    } else if b.button_id == "G8" || vk == 0x7E {
+                        Some("__DPI_UP__".to_string())
+                    } else {
+                        None
+                    }
+                } else if vk == 0x7D {
+                    Some("__DPI_DOWN__".to_string())
+                } else if vk == 0x7E {
+                    Some("__DPI_UP__".to_string())
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -622,8 +652,17 @@ impl KeybindListener {
                             if let Ok(binds) = bindings_arc.read() {
                                 binds
                                     .iter()
-                                    .filter(|b| b.vk_code > 0 && !b.assigned_macro.trim().is_empty())
-                                    .map(|b| (b.vk_code, b.assigned_macro.clone()))
+                                    .filter_map(|b| {
+                                        if !b.assigned_macro.trim().is_empty() {
+                                            Some((b.vk_code, b.assigned_macro.clone()))
+                                        } else if b.button_id == "G7" || b.vk_code == 0x7D {
+                                            Some((b.vk_code, "__DPI_DOWN__".to_string()))
+                                        } else if b.button_id == "G8" || b.vk_code == 0x7E {
+                                            Some((b.vk_code, "__DPI_UP__".to_string()))
+                                        } else {
+                                            None
+                                        }
+                                    })
                                     .collect()
                             } else {
                                 Vec::new()

@@ -28,6 +28,25 @@ pub fn setup_macro_triggers(
     let app_weak = app.as_weak();
 
     listener.set_callback(move |macro_name: String| {
+        if macro_name == "__DPI_DOWN__" {
+            let weak = app_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.invoke_dpi_down();
+                }
+            });
+            return;
+        }
+        if macro_name == "__DPI_UP__" {
+            let weak = app_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.invoke_dpi_up();
+                }
+            });
+            return;
+        }
+
         let mut slot = act_slot.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Some((curr_name, active)) = slot.take() {

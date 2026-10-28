@@ -101,6 +101,8 @@ export struct QuickKeyItem {
 
         in-out property <[MacroItem]> macro_items: [];
         in-out property <[KeybindItem]> keybind_items: [];
+        in-out property <[int]> dpi_presets: [400, 800, 1200, 1600, 2400, 3200, 6400];
+        in-out property <string> custom_dpi_input: "";
 
         // Macro builder state
         in-out property <bool> show_macro_builder: false;
@@ -116,6 +118,11 @@ export struct QuickKeyItem {
         in-out property <string> picker_button_name: "";
 
         callback set_dpi(int);
+        callback dpi_up();
+        callback dpi_down();
+        callback add_dpi_preset(int);
+        callback remove_dpi_preset(int);
+        callback apply_custom_dpi(string);
         callback set_rgb_static(int, int, int);
         callback set_rgb_cycle();
         callback set_rgb_breathe(int, int, int);
@@ -538,73 +545,231 @@ export struct QuickKeyItem {
 
                             Text {
                                 text: "Настройка сенсора HERO 25K";
-                                font-size: 20px;
+                                font-size: Theme.font_title;
                                 font-weight: 800;
                                 color: Theme.text_primary;
                             }
 
-                            // Big DPI Card
+                            // Big DPI Card with Quick Buttons
                             Rectangle {
-                                height: 130px;
-                                border-radius: 10px;
+                                height: 140px;
+                                border-radius: Theme.radius_md;
                                 background: Theme.card_bg_subtle;
                                 border-width: 1px;
                                 border-color: Theme.border_subtle;
 
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 6px;
+                                HorizontalLayout {
+                                    padding: 20px;
+                                    alignment: space-between;
 
-                                    Text {
-                                        text: "АКТИВНОЕ РАЗРЕШЕНИЕ СЕНСОРА";
-                                        font-size: 11px;
-                                        font-weight: 800;
-                                        color: Theme.text_subtle;
-                                        horizontal-alignment: center;
+                                    // Button: DPI Down (Previous Preset)
+                                    Rectangle {
+                                        width: 160px;
+                                        height: 48px;
+                                        border-radius: Theme.radius_base;
+                                        background: Theme.surface_alt;
+                                        border-width: 1px;
+                                        border-color: Theme.border_btn;
+
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 8px;
+                                            Text { text: "◀"; font-size: Theme.font_caption; color: Theme.accent; vertical-alignment: center; }
+                                            Text { text: "DPI ВНИЗ (G7)"; font-size: Theme.font_caption; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; }
+                                        }
+                                        TouchArea { clicked => { root.dpi_down(); } }
                                     }
-                                    Text {
-                                        text: root.current_dpi + " DPI";
-                                        font-size: 46px;
-                                        font-weight: 900;
-                                        color: Theme.accent;
-                                        horizontal-alignment: center;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 4px;
+
+                                        Text {
+                                            text: "ТЕКУЩЕЕ РАЗРЕШЕНИЕ СЕНСОРА";
+                                            font-size: Theme.font_xs;
+                                            font-weight: 800;
+                                            color: Theme.text_subtle;
+                                            horizontal-alignment: center;
+                                        }
+                                        Text {
+                                            text: root.current_dpi + " DPI";
+                                            font-size: 42px;
+                                            font-weight: 900;
+                                            color: Theme.accent;
+                                            horizontal-alignment: center;
+                                        }
+                                        Text {
+                                            text: "HERO 25K • Нулевое сглаживание, аппаратная точность 1:1";
+                                            font-size: Theme.font_caption;
+                                            color: Theme.text_muted;
+                                            horizontal-alignment: center;
+                                        }
                                     }
-                                    Text {
-                                        text: "HERO 25K • Нулевое сглаживание, аппаратная точность 1:1";
-                                        font-size: 11px;
-                                        color: Theme.text_muted;
-                                        horizontal-alignment: center;
+
+                                    // Button: DPI Up (Next Preset)
+                                    Rectangle {
+                                        width: 160px;
+                                        height: 48px;
+                                        border-radius: Theme.radius_base;
+                                        background: Theme.surface_alt;
+                                        border-width: 1px;
+                                        border-color: Theme.border_btn;
+
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 8px;
+                                            Text { text: "DPI ВВЕРХ (G8)"; font-size: Theme.font_caption; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; }
+                                            Text { text: "▶"; font-size: Theme.font_caption; color: Theme.accent; vertical-alignment: center; }
+                                        }
+                                        TouchArea { clicked => { root.dpi_up(); } }
                                     }
                                 }
                             }
 
-                            // Presets
-                            Text {
-                                text: "Быстрые пресеты чувствительности:";
-                                font-size: 13px;
-                                font-weight: 700;
-                                color: Theme.text_white_dim;
+                            // Dynamic Configurable Presets
+                            VerticalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Настраиваемые пресеты чувствительности (переключение по кнопкам G7/G8):";
+                                    font-size: Theme.font_body;
+                                    font-weight: 700;
+                                    color: Theme.text_white_dim;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    alignment: start;
+                                    for dpi[idx] in root.dpi_presets : Rectangle {
+                                        height: 42px;
+                                        border-radius: Theme.radius_base;
+                                        background: root.current_dpi == dpi ? Theme.accent : Theme.surface_alt;
+                                        border-width: 1px;
+                                        border-color: root.current_dpi == dpi ? Theme.accent : Theme.border_btn;
+
+                                        HorizontalLayout {
+                                            padding-left: 14px;
+                                            padding-right: 10px;
+                                            spacing: 8px;
+                                            alignment: center;
+
+                                            Text {
+                                                text: dpi + " DPI";
+                                                font-size: Theme.font_body;
+                                                font-weight: 800;
+                                                color: root.current_dpi == dpi ? Theme.app_bg : Theme.text_white_soft;
+                                                vertical-alignment: center;
+                                            }
+
+                                            // Remove preset button (if more than 1)
+                                            if root.dpi_presets.length > 1 : Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                border-radius: Theme.radius_xs;
+                                                background: root.current_dpi == dpi ? Theme.app_bg : Theme.surface_elevated;
+
+                                                Text {
+                                                    text: "✕";
+                                                    font-size: 10px;
+                                                    font-weight: 800;
+                                                    color: root.current_dpi == dpi ? Theme.accent : Theme.text_subtle;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                                TouchArea {
+                                                    clicked => { root.remove_dpi_preset(dpi); }
+                                                }
+                                            }
+                                        }
+                                        TouchArea {
+                                            clicked => { root.set_dpi(dpi); }
+                                        }
+                                    }
+                                }
                             }
 
-                            HorizontalLayout {
-                                spacing: 10px;
-                                for dpi in [400, 800, 1200, 1600, 2400, 3200, 6400] : Rectangle {
-                                    height: 40px;
-                                    border-radius: 6px;
-                                    background: root.current_dpi == dpi ? Theme.accent : Theme.surface_alt;
-                                    border-width: 1px;
-                                    border-color: root.current_dpi == dpi ? Theme.accent : Theme.border_btn;
+                            // Custom DPI Input Section
+                            Rectangle {
+                                border-radius: Theme.radius_md;
+                                background: Theme.card_bg_subtle;
+                                border-width: 1px;
+                                border-color: Theme.border_card;
+
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 12px;
 
                                     Text {
-                                        text: dpi;
-                                        font-size: 13px;
-                                        font-weight: 800;
-                                        color: root.current_dpi == dpi ? Theme.app_bg : Theme.text_white_soft;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
+                                        text: "Кастомный DPI (произвольное значение):";
+                                        font-size: Theme.font_body;
+                                        font-weight: 700;
+                                        color: Theme.text_white_dim;
                                     }
-                                    TouchArea {
-                                        clicked => { root.set_dpi(dpi); }
+
+                                    HorizontalLayout {
+                                        spacing: 12px;
+                                        alignment: start;
+
+                                        custom_dpi_input := LineEdit {
+                                            width: 180px;
+                                            height: 40px;
+                                            placeholder-text: "Например: 1350";
+                                            text <=> root.custom_dpi_input;
+                                            accepted => {
+                                                root.apply_custom_dpi(self.text);
+                                            }
+                                        }
+
+                                        // Apply Custom DPI Button
+                                        Rectangle {
+                                            height: 40px;
+                                            border-radius: Theme.radius_base;
+                                            background: Theme.accent;
+
+                                            HorizontalLayout {
+                                                padding-left: 18px;
+                                                padding-right: 18px;
+                                                alignment: center;
+                                                Text {
+                                                    text: "Установить DPI";
+                                                    font-size: Theme.font_body_sm;
+                                                    font-weight: 800;
+                                                    color: Theme.app_bg;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            TouchArea {
+                                                clicked => {
+                                                    root.apply_custom_dpi(custom_dpi_input.text);
+                                                }
+                                            }
+                                        }
+
+                                        // Add to presets button
+                                        Rectangle {
+                                            height: 40px;
+                                            border-radius: Theme.radius_base;
+                                            background: Theme.surface_alt;
+                                            border-width: 1px;
+                                            border-color: Theme.border_btn;
+
+                                            HorizontalLayout {
+                                                padding-left: 16px;
+                                                padding-right: 16px;
+                                                alignment: center;
+                                                Text {
+                                                    text: "➕ Добавить в пресеты";
+                                                    font-size: Theme.font_body_sm;
+                                                    font-weight: 700;
+                                                    color: Theme.text_primary;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            TouchArea {
+                                                clicked => {
+                                                    root.add_dpi_preset(custom_dpi_input.text.to-float());
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -616,12 +781,12 @@ export struct QuickKeyItem {
                                     alignment: space-between;
                                     Text {
                                         text: "Плавная регулировка (100 - 25600 DPI, шаг 50):";
-                                        font-size: 12px;
+                                        font-size: Theme.font_caption;
                                         color: Theme.text_secondary;
                                     }
                                     Text {
                                         text: root.current_dpi + " DPI";
-                                        font-size: 12px;
+                                        font-size: Theme.font_caption;
                                         font-weight: 700;
                                         color: Theme.accent;
                                     }

@@ -1,8 +1,9 @@
+use std::rc::Rc;
 use std::sync::mpsc::channel;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use hidapi::HidApi;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, VecModel};
 
 use super::bridge::MainWindow;
 use crate::hidpp::HidppDevice;
@@ -11,6 +12,7 @@ use crate::hidpp::features::{
     set_led_effect, turn_off_all_leds, enable_host_mode,
     LedZone, LedEffect,
 };
+use crate::lghub::{add_dpi_preset, remove_dpi_preset, get_next_preset, get_prev_preset};
 
 pub const LOGITECH_VID: u16 = 0x046D;
 pub const G502_PID: u16 = 0xC08B;
@@ -25,7 +27,11 @@ pub enum DeviceCommand {
     SetRgbOff,
 }
 
-pub fn init_device_worker(app: &MainWindow) {
+pub fn init_device_worker(
+    app: &MainWindow,
+    dpi_presets_model: &Rc<VecModel<i32>>,
+    dpi_presets: &Arc<Mutex<Vec<u16>>>,
+) {
     let (cmd_tx, cmd_rx) = channel::<DeviceCommand>();
 
     // Initial Device Probing
@@ -134,18 +140,95 @@ pub fn init_device_worker(app: &MainWindow) {
                 app.set_device_connected(false);
                 app.set_device_name("Ошибка доступа к мыши".into());
                 app.set_status_msg(format!("Не удалось открыть устройство: {}", e).into());
+                spawn_offline_cmd_handler(cmd_rx, app.as_weak());
             }
         }
     } else {
         app.set_device_connected(false);
         app.set_device_name("Устройство не найдено".into());
-        app.set_status_msg("Мышь Logitech G502 HERO не обнаружена".into());
+        app.set_status_msg("Мышь Logitech G502 HERO не обнаружена (автономный режим)".into());
+        spawn_offline_cmd_handler(cmd_rx, app.as_weak());
     }
 
     // Callbacks for DPI & RGB
     let tx = cmd_tx.clone();
     app.on_set_dpi(move |target| {
         let _ = tx.send(DeviceCommand::SetDpi(target as u16));
+    });
+
+    let app_weak = app.as_weak();
+    let tx = cmd_tx.clone();
+    let presets_arc = dpi_presets.clone();
+    app.on_dpi_up(move || {
+        if let Some(app) = app_weak.upgrade() {
+            let curr = app.get_current_dpi() as u16;
+            let next = {
+                let p = presets_arc.lock().unwrap_or_else(|e| e.into_inner());
+                get_next_preset(&p, curr)
+            };
+            let _ = tx.send(DeviceCommand::SetDpi(next));
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let tx = cmd_tx.clone();
+    let presets_arc = dpi_presets.clone();
+    app.on_dpi_down(move || {
+        if let Some(app) = app_weak.upgrade() {
+            let curr = app.get_current_dpi() as u16;
+            let prev = {
+                let p = presets_arc.lock().unwrap_or_else(|e| e.into_inner());
+                get_prev_preset(&p, curr)
+            };
+            let _ = tx.send(DeviceCommand::SetDpi(prev));
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let tx = cmd_tx.clone();
+    let presets_arc = dpi_presets.clone();
+    let model = dpi_presets_model.clone();
+    app.on_add_dpi_preset(move |target| {
+        let dpi_val = ((target + 25) / 50 * 50).clamp(100, 25600) as u16;
+        let mut p = presets_arc.lock().unwrap_or_else(|e| e.into_inner());
+        if let Ok(()) = add_dpi_preset(&mut p, dpi_val) {
+            let new_list: Vec<i32> = p.iter().map(|&x| x as i32).collect();
+            model.set_vec(new_list);
+            let _ = tx.send(DeviceCommand::SetDpi(dpi_val));
+            if let Some(app) = app_weak.upgrade() {
+                app.set_custom_dpi_input("".into());
+                app.set_status_msg(format!("Добавлен пресет DPI: {}", dpi_val).into());
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let presets_arc = dpi_presets.clone();
+    let model = dpi_presets_model.clone();
+    app.on_remove_dpi_preset(move |target| {
+        let mut p = presets_arc.lock().unwrap_or_else(|e| e.into_inner());
+        if let Ok(()) = remove_dpi_preset(&mut p, target as u16) {
+            let new_list: Vec<i32> = p.iter().map(|&x| x as i32).collect();
+            model.set_vec(new_list);
+            if let Some(app) = app_weak.upgrade() {
+                app.set_status_msg(format!("Удален пресет DPI: {}", target).into());
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let tx = cmd_tx.clone();
+    app.on_apply_custom_dpi(move |s| {
+        let str_val = s.trim();
+        if let Ok(parsed) = str_val.parse::<i32>() {
+            let clamped = ((parsed + 25) / 50 * 50).clamp(100, 25600) as u16;
+            let _ = tx.send(DeviceCommand::SetDpi(clamped));
+            if let Some(app) = app_weak.upgrade() {
+                app.set_custom_dpi_input("".into());
+            }
+        } else if let Some(app) = app_weak.upgrade() {
+            app.set_status_msg("Введите корректное число DPI (100 - 25600)".into());
+        }
     });
 
     let tx = cmd_tx.clone();
@@ -183,6 +266,22 @@ pub fn init_device_worker(app: &MainWindow) {
             app.set_device_connected(found_g502);
             app.set_headset_connected(found_g435);
             app.set_status_msg("Устройства обновлены".into());
+        }
+    });
+}
+
+fn spawn_offline_cmd_handler(cmd_rx: std::sync::mpsc::Receiver<DeviceCommand>, app_weak: slint::Weak<MainWindow>) {
+    thread::spawn(move || {
+        while let Ok(cmd) = cmd_rx.recv() {
+            if let DeviceCommand::SetDpi(dpi) = cmd {
+                let weak = app_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(app) = weak.upgrade() {
+                        app.set_current_dpi(dpi as i32);
+                        app.set_status_msg(format!("Установлен DPI: {} (автономный режим)", dpi).into());
+                    }
+                });
+            }
         }
     });
 }

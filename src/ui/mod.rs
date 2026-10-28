@@ -17,6 +17,7 @@ use keybind_controller::setup_keybind_controller;
 use crate::lghub::{
     LgHubSettings, custom_macros::load_custom_macros,
     keybinds::{KeybindListener, load_bindings},
+    dpi_presets::load_dpi_presets,
     macro_engine,
 };
 
@@ -38,6 +39,13 @@ pub fn run() {
 
     let builder_steps_model = Rc::new(VecModel::<slint::SharedString>::default());
     app.set_builder_steps(ModelRc::from(builder_steps_model.clone()));
+
+    let initial_dpi_presets = load_dpi_presets();
+    let dpi_presets_model = Rc::new(VecModel::<i32>::from(
+        initial_dpi_presets.iter().map(|&x| x as i32).collect::<Vec<_>>()
+    ));
+    app.set_dpi_presets(ModelRc::from(dpi_presets_model.clone()));
+    let dpi_presets = Arc::new(Mutex::new(initial_dpi_presets));
 
     // 2. Data state
     let lghub_settings = Arc::new(LgHubSettings::load_from_db().ok());
@@ -64,7 +72,7 @@ pub fn run() {
     app.set_listener_active(false);
 
     // 7. Initialize modular controllers
-    init_device_worker(&app);
+    init_device_worker(&app, &dpi_presets_model, &dpi_presets);
     setup_macro_controller(&MacroControllerContext {
         app: &app,
         macro_model: &macro_model,
