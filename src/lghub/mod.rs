@@ -3,6 +3,7 @@ pub mod hid_to_vk;
 pub mod macro_engine;
 pub mod keybinds;
 pub mod custom_macros;
+pub mod storage;
 
 pub use db::{LgHubSettings, LgCard, LgProfile, LgMacro, LgMacroComponent};
 pub use hid_to_vk::hid_usage_to_vk;

@@ -94,11 +94,10 @@ export struct QuickKeyItem {
         in-out property <string> headset_name: "Logitech G435 Lightspeed";
         in-out property <bool> headset_connected: false;
         in-out property <int> current_dpi: 800;
-        in-out property <int> polling_rate: 1000;
         in-out property <string> status_msg: "Готово к работе";
         in-out property <color> current_color: Theme.accent;
         in-out property <string> active_macro_name: "";
-        in-out property <bool> listener_active: true;
+        in-out property <bool> listener_active: false;
 
         in-out property <[MacroItem]> macro_items: [];
         in-out property <[KeybindItem]> keybind_items: [];
@@ -117,7 +116,6 @@ export struct QuickKeyItem {
         in-out property <string> picker_button_name: "";
 
         callback set_dpi(int);
-        callback set_polling_rate(int);
         callback set_rgb_static(int, int, int);
         callback set_rgb_cycle();
         callback set_rgb_breathe(int, int, int);
@@ -223,7 +221,7 @@ export struct QuickKeyItem {
 
                         // Mouse status pill
                         Pill {
-                            text: root.device_connected ? (root.device_name + " • 1000Hz") : "Мышь не обнаружена";
+                            text: root.device_connected ? root.device_name : "Мышь не обнаружена";
                             text_color: root.device_connected ? Theme.text_heading : Theme.error_text;
                             bg_col: root.device_connected ? Theme.success_bg : Theme.error_subtle;
                             border_col: root.device_connected ? Theme.success : Theme.error;
@@ -237,15 +235,6 @@ export struct QuickKeyItem {
                             text_color: root.headset_connected ? Theme.accent : Theme.text_inactive;
                             bg_col: root.headset_connected ? Theme.headset_bg_connected : Theme.headset_bg_disconnected;
                             border_col: root.headset_connected ? Theme.accent : Theme.headset_border_disconnected;
-                        }
-
-                        // Low memory consumption badge
-                        Pill {
-                            text: "RAM: ~14 MB • CPU: 0%";
-                            text_color: Theme.success;
-                            bg_col: Theme.card_bg;
-                            border_col: Theme.border_default;
-                            font_sz: 11px;
                         }
 
                         // Refresh button
@@ -314,7 +303,7 @@ export struct QuickKeyItem {
                                 }
 
                                 Text {
-                                    text: "Сенсор: " + root.current_dpi + " DPI (" + root.polling_rate + "Hz)";
+                                    text: "Сенсор: HERO 25K • " + root.current_dpi + " DPI";
                                     font-size: 11px;
                                     font-weight: 600;
                                     color: Theme.text_white_dim;
@@ -625,7 +614,7 @@ export struct QuickKeyItem {
                                 HorizontalLayout {
                                     alignment: space-between;
                                     Text {
-                                        text: "Плавная регулировка (100 - 6400 DPI, шаг 50):";
+                                        text: "Плавная регулировка (100 - 25600 DPI, шаг 50):";
                                         font-size: 12px;
                                         color: Theme.text_secondary;
                                     }
@@ -638,46 +627,13 @@ export struct QuickKeyItem {
                                 }
                                 Slider {
                                     minimum: 100;
-                                    maximum: 6400;
+                                    maximum: 25600;
                                     value: root.current_dpi;
                                     changed(v) => {
                                         root.current_dpi = Math.round(v / 50) * 50;
                                     }
                                     released(v) => {
                                         root.set_dpi(root.current_dpi);
-                                    }
-                                }
-                            }
-
-                            // Report Rate Selector
-                            VerticalLayout {
-                                spacing: 8px;
-                                Text {
-                                    text: "Частота опроса USB (Report Rate):";
-                                    font-size: 13px;
-                                    font-weight: 700;
-                                    color: Theme.text_white_dim;
-                                }
-                                HorizontalLayout {
-                                    spacing: 12px;
-                                    for rate in [125, 250, 500, 1000] : Rectangle {
-                                        height: 38px;
-                                        border-radius: 6px;
-                                        background: root.polling_rate == rate ? Theme.success : Theme.surface_alt;
-                                        border-width: 1px;
-                                        border-color: root.polling_rate == rate ? Theme.success : Theme.border_btn;
-
-                                        Text {
-                                            text: rate + " Гц (" + (1000 / rate) + " мс)" + (rate == 1000 ? " ★" : "");
-                                            font-size: 12px;
-                                            font-weight: 700;
-                                            color: root.polling_rate == rate ? Theme.app_bg : Theme.text_white_soft;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                        TouchArea {
-                                            clicked => { root.set_polling_rate(rate); }
-                                        }
                                     }
                                 }
                             }

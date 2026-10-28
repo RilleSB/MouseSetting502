@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
+use super::storage::{get_storage_path as get_appdata_storage_path, atomic_write_file};
 
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -28,7 +29,7 @@ pub struct ButtonBinding {
 }
 
 fn get_storage_path() -> PathBuf {
-    PathBuf::from(DEFAULT_KEYBINDS_FILE)
+    get_appdata_storage_path(DEFAULT_KEYBINDS_FILE)
 }
 
 /// Returns the standard default bindings for Logitech G502 HERO and common hotkeys
@@ -63,7 +64,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
             button_label: "G4 • Боковая назад".into(),
             default_action: "Назад (Браузер)".into(),
             vk_code: 0x05, // VK_XBUTTON1
-            assigned_macro: "⚡ Быстрый клик ЛКМ (Toggle)".into(),
+            assigned_macro: "".into(),
             is_mouse_button: true,
         },
         ButtonBinding {
@@ -71,7 +72,7 @@ pub fn default_bindings() -> Vec<ButtonBinding> {
             button_label: "G5 • Боковая вперед".into(),
             default_action: "Вперед (Браузер)".into(),
             vk_code: 0x06, // VK_XBUTTON2
-            assigned_macro: "🎯 Тройной выстрел (Burst 3x)".into(),
+            assigned_macro: "".into(),
             is_mouse_button: true,
         },
         ButtonBinding {
@@ -224,8 +225,7 @@ pub fn save_bindings(bindings: &[ButtonBinding]) -> Result<(), String> {
 pub fn save_bindings_to_path(bindings: &[ButtonBinding], path: &Path) -> Result<(), String> {
     let json_str = serde_json::to_string_pretty(bindings)
         .map_err(|e| format!("JSON serialization error: {e}"))?;
-    fs::write(path, json_str).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
-    Ok(())
+    atomic_write_file(path, &json_str)
 }
 
 /// Assign a macro to a specific button
@@ -259,12 +259,16 @@ pub fn rename_assigned_macro(bindings: &mut [ButtonBinding], old_name: &str, new
 #[cfg(windows)]
 struct HookState {
     bindings: Arc<RwLock<Vec<ButtonBinding>>>,
-    callback: Arc<dyn Fn(String) + Send + Sync + 'static>,
+    trigger_tx: std::sync::mpsc::Sender<String>,
+    panic_tx: std::sync::mpsc::Sender<()>,
     last_trigger: Mutex<HashMap<String, Instant>>,
 }
 
 #[cfg(windows)]
 static GLOBAL_HOOK: Mutex<Option<HookState>> = Mutex::new(None);
+
+#[cfg(windows)]
+static PRESSED_KEYS: Mutex<Option<HashSet<u16>>> = Mutex::new(None);
 
 #[cfg(windows)]
 fn check_and_dispatch_button(btn_id: &str) -> bool {
@@ -289,10 +293,7 @@ fn check_and_dispatch_button(btn_id: &str) -> bool {
             };
             if allow {
                 last.insert(name.clone(), now);
-                let cb = state.callback.clone();
-                thread::spawn(move || {
-                    cb(name);
-                });
+                let _ = state.trigger_tx.send(name);
             }
             return true;
         }
@@ -323,15 +324,20 @@ fn check_and_dispatch_vk(vk: u16) -> bool {
             };
             if allow {
                 last.insert(name.clone(), now);
-                let cb = state.callback.clone();
-                thread::spawn(move || {
-                    cb(name);
-                });
+                let _ = state.trigger_tx.send(name);
             }
             return true;
         }
     }
     false
+}
+
+#[cfg(windows)]
+fn dispatch_panic_stop() {
+    let guard = GLOBAL_HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(state) = guard.as_ref() {
+        let _ = state.panic_tx.send(());
+    }
 }
 
 #[cfg(windows)]
@@ -383,13 +389,29 @@ unsafe extern "system" fn low_level_mouse_proc(code: i32, wparam: usize, lparam:
 unsafe extern "system" fn low_level_keyboard_proc(code: i32, wparam: usize, lparam: isize) -> isize {
     if code >= 0 && lparam != 0 {
         let msg = wparam as u32;
-        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
-            let kbd = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
-            // LLKHF_INJECTED = 0x10: ignore synthetic keyboard input
-            if (kbd.flags & 0x10) == 0 {
-                let vk = kbd.vkCode as u16;
-                if check_and_dispatch_vk(vk) {
-                    // Key trigger fired macro
+        let kbd = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
+        // LLKHF_INJECTED = 0x10: ignore synthetic keyboard input
+        if (kbd.flags & 0x10) == 0 {
+            let vk = kbd.vkCode as u16;
+
+            // Global emergency panic stop: Esc key (0x1B) immediately halts all running macros
+            if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && vk == 0x1B {
+                dispatch_panic_stop();
+            }
+
+            if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+                let mut guard = PRESSED_KEYS.lock().unwrap_or_else(|e| e.into_inner());
+                let set = guard.get_or_insert_with(HashSet::new);
+                // Ignore typematic auto-repeat events when key is held down
+                if !set.contains(&vk) {
+                    set.insert(vk);
+                    drop(guard);
+                    let _ = check_and_dispatch_vk(vk);
+                }
+            } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
+                let mut guard = PRESSED_KEYS.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(set) = guard.as_mut() {
+                    set.remove(&vk);
                 }
             }
         }
@@ -398,6 +420,7 @@ unsafe extern "system" fn low_level_keyboard_proc(code: i32, wparam: usize, lpar
 }
 
 type CallbackFn = Arc<dyn Fn(String) + Send + Sync + 'static>;
+type PanicFn = Arc<dyn Fn() + Send + Sync + 'static>;
 
 /// Active background listener for global key and mouse button triggers
 pub struct KeybindListener {
@@ -405,6 +428,7 @@ pub struct KeybindListener {
     thread_id: Arc<AtomicU32>,
     bindings: Arc<RwLock<Vec<ButtonBinding>>>,
     callback: Arc<RwLock<Option<CallbackFn>>>,
+    panic_callback: Arc<RwLock<Option<PanicFn>>>,
 }
 
 impl KeybindListener {
@@ -414,6 +438,25 @@ impl KeybindListener {
             thread_id: Arc::new(AtomicU32::new(0)),
             bindings: Arc::new(RwLock::new(initial_bindings)),
             callback: Arc::new(RwLock::new(None)),
+            panic_callback: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    pub fn set_panic_callback<F>(&self, callback: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        if let Ok(mut lock) = self.panic_callback.write() {
+            *lock = Some(Arc::new(callback));
+        }
+    }
+
+    pub fn set_callback<F>(&self, callback: F)
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        if let Ok(mut lock) = self.callback.write() {
+            *lock = Some(Arc::new(callback));
         }
     }
 
@@ -489,10 +532,35 @@ impl KeybindListener {
         let running = self.running.clone();
         let thread_id_store = self.thread_id.clone();
         let bindings_arc = self.bindings.clone();
+        let panic_cb_arc = self.panic_callback.clone();
 
         #[cfg(windows)]
         {
-            let cb_for_thread = callback.clone();
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            let (panic_tx, panic_rx) = std::sync::mpsc::channel::<()>();
+
+            // Single dedicated worker thread for triggered macros (Item 9)
+            let cb_worker = callback.clone();
+            thread::spawn(move || {
+                while let Ok(macro_name) = rx.recv() {
+                    cb_worker(macro_name);
+                }
+            });
+
+            // Single dedicated worker thread for emergency panic stop (Item 12)
+            thread::spawn(move || {
+                while let Ok(()) = panic_rx.recv() {
+                    if let Ok(guard) = panic_cb_arc.read() {
+                        if let Some(cb) = guard.as_ref() {
+                            cb();
+                        }
+                    }
+                }
+            });
+
+            let tx_for_thread = tx.clone();
+            let panic_tx_for_thread = panic_tx.clone();
+
             thread::spawn(move || {
                 println!("[*] Global Keybind/Button Listener starting...");
 
@@ -501,9 +569,16 @@ impl KeybindListener {
                     let mut guard = GLOBAL_HOOK.lock().unwrap_or_else(|e| e.into_inner());
                     *guard = Some(HookState {
                         bindings: bindings_arc.clone(),
-                        callback: cb_for_thread,
+                        trigger_tx: tx_for_thread.clone(),
+                        panic_tx: panic_tx_for_thread.clone(),
                         last_trigger: Mutex::new(HashMap::new()),
                     });
+                }
+
+                // Reset pressed keys state
+                {
+                    let mut guard = PRESSED_KEYS.lock().unwrap_or_else(|e| e.into_inner());
+                    *guard = Some(HashSet::new());
                 }
 
                 let cur_tid = unsafe { GetCurrentThreadId() };
@@ -539,6 +614,11 @@ impl KeybindListener {
                     let debounce_dur = Duration::from_millis(160);
 
                     while running.load(Ordering::SeqCst) {
+                        // Check Esc in polling mode too
+                        if check_key_down(0x1B) {
+                            let _ = panic_tx_for_thread.send(());
+                        }
+
                         let active_pairs: Vec<(u16, String)> = {
                             if let Ok(binds) = bindings_arc.read() {
                                 binds
@@ -564,11 +644,7 @@ impl KeybindListener {
 
                                 if allow {
                                     last_trigger_time.insert(macro_name.clone(), now);
-                                    let cb = callback.clone();
-                                    let m = macro_name.clone();
-                                    thread::spawn(move || {
-                                        cb(m);
-                                    });
+                                    let _ = tx_for_thread.send(macro_name);
                                 }
                             }
                             key_states.insert(vk, is_down);
@@ -590,7 +666,7 @@ impl KeybindListener {
 
         #[cfg(not(windows))]
         {
-            let _ = (running, thread_id_store, bindings_arc, callback);
+            let _ = (running, thread_id_store, bindings_arc, callback, panic_cb_arc);
         }
     }
 }

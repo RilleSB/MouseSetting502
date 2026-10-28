@@ -1,11 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use super::db::{LgMacro, LgMacroComponent};
+use super::storage::{get_storage_path as get_appdata_storage_path, atomic_write_file};
 
 const DEFAULT_MACROS_FILE: &str = "user_macros.json";
 
 fn get_storage_path() -> PathBuf {
-    PathBuf::from(DEFAULT_MACROS_FILE)
+    get_appdata_storage_path(DEFAULT_MACROS_FILE)
 }
 
 /// Returns standard starter presets if user has no saved macros yet
@@ -128,8 +129,7 @@ pub fn save_custom_macros(macros: &[LgMacro]) -> Result<(), String> {
 pub fn save_custom_macros_to_path(macros: &[LgMacro], path: &Path) -> Result<(), String> {
     let json_str = serde_json::to_string_pretty(macros)
         .map_err(|e| format!("JSON serialization error: {e}"))?;
-    fs::write(path, json_str).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
-    Ok(())
+    atomic_write_file(path, &json_str)
 }
 
 /// Add or update a custom macro in the list and save

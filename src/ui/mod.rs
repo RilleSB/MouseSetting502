@@ -39,7 +39,7 @@ enum DeviceCommand {
 }
 
 fn update_ui_macro_list(
-    app: &MainWindow,
+    macro_model: &Rc<VecModel<MacroItem>>,
     lghub_settings: &Arc<Option<LgHubSettings>>,
     custom_macros: &Arc<Mutex<Vec<LgMacro>>>,
 ) {
@@ -74,12 +74,11 @@ fn update_ui_macro_list(
         }
     }
 
-    let model = Rc::new(VecModel::from(items));
-    app.set_macro_items(ModelRc::from(model));
+    macro_model.set_vec(items);
 }
 
 fn update_ui_keybind_list(
-    app: &MainWindow,
+    keybind_model: &Rc<VecModel<KeybindItem>>,
     keybinds: &Arc<Mutex<Vec<ButtonBinding>>>,
 ) {
     let mut items = Vec::new();
@@ -94,31 +93,50 @@ fn update_ui_keybind_list(
             });
         }
     }
-    let model = Rc::new(VecModel::from(items));
-    app.set_keybind_items(ModelRc::from(model));
+    keybind_model.set_vec(items);
 }
 
 pub fn run() {
-    let app = MainWindow::new().expect("Failed to create MainWindow");
+    let app = match MainWindow::new() {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("[!] Ошибка инициализации MainWindow: {e}");
+            return;
+        }
+    };
+
+    // Models created ONCE, mutated in-place (Item 11)
+    let macro_model = Rc::new(VecModel::<MacroItem>::default());
+    app.set_macro_items(ModelRc::from(macro_model.clone()));
+
+    let keybind_model = Rc::new(VecModel::<KeybindItem>::default());
+    app.set_keybind_items(ModelRc::from(keybind_model.clone()));
+
+    let builder_steps_model = Rc::new(VecModel::<slint::SharedString>::default());
+    app.set_builder_steps(ModelRc::from(builder_steps_model.clone()));
 
     // Load settings from G HUB SQLite db
     let lghub_settings = Arc::new(LgHubSettings::load_from_db().ok());
 
-    // Load custom user macros from JSON
+    // Load custom user macros from JSON (%APPDATA% / Item 6)
     let custom_macros = Arc::new(Mutex::new(load_custom_macros()));
 
-    // Load keybindings from JSON
+    // Load keybindings from JSON (%APPDATA% / Item 6)
     let keybinds = Arc::new(Mutex::new(load_bindings()));
 
     // Populate initial models
-    update_ui_macro_list(&app, &lghub_settings, &custom_macros);
-    update_ui_keybind_list(&app, &keybinds);
+    update_ui_macro_list(&macro_model, &lghub_settings, &custom_macros);
+    update_ui_keybind_list(&keybind_model, &keybinds);
 
     // Active running macro state
     let active_macro: Arc<Mutex<Option<(String, macro_engine::ActiveMacro)>>> = Arc::new(Mutex::new(None));
 
     // Background Keybind Listener
-    let initial_binds = keybinds.lock().unwrap().clone();
+    let initial_binds = if let Ok(guard) = keybinds.lock() {
+        guard.clone()
+    } else {
+        Vec::new()
+    };
     let listener = Arc::new(KeybindListener::new(initial_binds));
 
     // Wire background trigger callback to macro executor
@@ -127,7 +145,7 @@ pub fn run() {
     let lghub_ref = lghub_settings.clone();
     let app_weak = app.as_weak();
 
-    listener.start(move |macro_name| {
+    listener.set_callback(move |macro_name: String| {
         let mut slot = act_slot.lock().unwrap_or_else(|e| e.into_inner());
 
         // If currently running this macro, stop it (toggle off)
@@ -196,7 +214,25 @@ pub fn run() {
         }
     });
 
-    app.set_listener_active(true);
+    // Wire emergency panic stop on Esc (Item 12)
+    let panic_act_slot = active_macro.clone();
+    let panic_app_weak = app.as_weak();
+    listener.set_panic_callback(move || {
+        let mut slot = panic_act_slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((curr_name, active)) = slot.take() {
+            active.stop();
+            let weak = panic_app_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.set_active_macro_name("".into());
+                    app.set_status_msg(format!("⛔ Экстренная остановка (Esc): '{}' остановлен", curr_name).into());
+                }
+            });
+        }
+    });
+
+    // Explicit hook activation (Item 4: do NOT start automatically)
+    app.set_listener_active(false);
 
     // HID Device worker channel
     let (cmd_tx, cmd_rx) = channel::<DeviceCommand>();
@@ -321,13 +357,7 @@ pub fn run() {
         let _ = tx.send(DeviceCommand::SetDpi(target as u16));
     });
 
-    let app_weak = app.as_weak();
-    app.on_set_polling_rate(move |rate| {
-        if let Some(app) = app_weak.upgrade() {
-            app.set_polling_rate(rate);
-            app.set_status_msg(format!("Частота опроса сенсора установлена: {} Гц", rate).into());
-        }
-    });
+
 
     let tx = cmd_tx.clone();
     app.on_set_rgb_static(move |r, g, b| {
@@ -475,13 +505,13 @@ pub fn run() {
     // Open builder for new macro
     let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     app.on_open_macro_builder(move || {
         if let Some(app) = app_weak.upgrade() {
             if let Ok(mut steps) = steps_ref.lock() {
                 steps.clear();
             }
-            let empty_model = Rc::new(VecModel::default());
-            app.set_builder_steps(ModelRc::from(empty_model));
+            steps_model.set_vec(Vec::new());
             app.set_builder_editing_original("".into());
             app.set_builder_name("Мой новый автокликер".into());
             app.set_builder_is_toggle(true);
@@ -492,6 +522,7 @@ pub fn run() {
     // Edit existing custom macro
     let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     let custom_arc = custom_macros.clone();
     app.on_edit_custom_macro(move |name| {
         let target = if let Ok(custom) = custom_arc.lock() {
@@ -504,12 +535,11 @@ pub fn run() {
             && let Ok(mut steps) = steps_ref.lock() {
                 *steps = m.sequence.clone();
                 let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-                let model = Rc::new(VecModel::from(slint_steps));
+                steps_model.set_vec(slint_steps);
                 if let Some(app) = app_weak.upgrade() {
                     app.set_builder_editing_original(m.name.clone().into());
                     app.set_builder_name(m.name.into());
                     app.set_builder_is_toggle(m.is_toggle);
-                    app.set_builder_steps(ModelRc::from(model));
                     app.set_show_macro_builder(true);
                 }
             }
@@ -523,8 +553,8 @@ pub fn run() {
     });
 
     // Builder Add Mouse
-    let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     app.on_builder_add_mouse(move |button, down, delay| {
         let comp = LgMacroComponent {
             mouse_button: Some(button as u8),
@@ -534,18 +564,14 @@ pub fn run() {
             delay_ms: if delay > 0 { Some(delay as u64) } else { None },
         };
         if let Ok(mut steps) = steps_ref.lock() {
+            steps_model.push(format_component(&comp).into());
             steps.push(comp);
-            let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-            let model = Rc::new(VecModel::from(slint_steps));
-            if let Some(app) = app_weak.upgrade() {
-                app.set_builder_steps(ModelRc::from(model));
-            }
         }
     });
 
     // Builder Add Key
-    let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     app.on_builder_add_key(move |vk, down, delay| {
         let comp = LgMacroComponent {
             mouse_button: None,
@@ -555,18 +581,14 @@ pub fn run() {
             delay_ms: if delay > 0 { Some(delay as u64) } else { None },
         };
         if let Ok(mut steps) = steps_ref.lock() {
+            steps_model.push(format_component(&comp).into());
             steps.push(comp);
-            let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-            let model = Rc::new(VecModel::from(slint_steps));
-            if let Some(app) = app_weak.upgrade() {
-                app.set_builder_steps(ModelRc::from(model));
-            }
         }
     });
 
     // Builder Add Delay
-    let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     app.on_builder_add_delay(move |delay| {
         let comp = LgMacroComponent {
             mouse_button: None,
@@ -576,73 +598,57 @@ pub fn run() {
             delay_ms: Some(delay as u64),
         };
         if let Ok(mut steps) = steps_ref.lock() {
+            steps_model.push(format_component(&comp).into());
             steps.push(comp);
-            let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-            let model = Rc::new(VecModel::from(slint_steps));
-            if let Some(app) = app_weak.upgrade() {
-                app.set_builder_steps(ModelRc::from(model));
-            }
         }
     });
 
     // Builder Clear
-    let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     app.on_builder_clear_steps(move || {
         if let Ok(mut steps) = steps_ref.lock() {
             steps.clear();
         }
-        if let Some(app) = app_weak.upgrade() {
-            let empty_model = Rc::new(VecModel::default());
-            app.set_builder_steps(ModelRc::from(empty_model));
-        }
+        steps_model.set_vec(Vec::new());
     });
 
     // Builder Remove Single Step
-    let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     app.on_builder_remove_step(move |idx| {
         if let Ok(mut steps) = steps_ref.lock() {
-            if (idx as usize) < steps.len() {
-                steps.remove(idx as usize);
-            }
-            let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-            let model = Rc::new(VecModel::from(slint_steps));
-            if let Some(app) = app_weak.upgrade() {
-                app.set_builder_steps(ModelRc::from(model));
+            let i = idx as usize;
+            if i < steps.len() {
+                steps.remove(i);
+                steps_model.remove(i);
             }
         }
     });
 
     // Builder Move Step Up
-    let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     app.on_builder_move_step_up(move |idx| {
         let idx = idx as usize;
         if let Ok(mut steps) = steps_ref.lock()
             && idx > 0 && idx < steps.len() {
                 steps.swap(idx - 1, idx);
                 let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-                let model = Rc::new(VecModel::from(slint_steps));
-                if let Some(app) = app_weak.upgrade() {
-                    app.set_builder_steps(ModelRc::from(model));
-                }
+                steps_model.set_vec(slint_steps);
             }
     });
 
     // Builder Move Step Down
-    let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
+    let steps_model = builder_steps_model.clone();
     app.on_builder_move_step_down(move |idx| {
         let idx = idx as usize;
         if let Ok(mut steps) = steps_ref.lock()
             && idx + 1 < steps.len() {
                 steps.swap(idx, idx + 1);
                 let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-                let model = Rc::new(VecModel::from(slint_steps));
-                if let Some(app) = app_weak.upgrade() {
-                    app.set_builder_steps(ModelRc::from(model));
-                }
+                steps_model.set_vec(slint_steps);
             }
     });
 
@@ -653,6 +659,8 @@ pub fn run() {
     let settings_arc = lghub_settings.clone();
     let keybinds_arc = keybinds.clone();
     let listener_ref = listener.clone();
+    let macro_model_ref = macro_model.clone();
+    let keybind_model_ref = keybind_model.clone();
     app.on_builder_save_macro(move |orig_name, name, is_toggle| {
         let name_str = name.trim().to_string();
         if name_str.is_empty() {
@@ -662,7 +670,7 @@ pub fn run() {
             return;
         }
 
-        let mut steps = steps_ref.lock().unwrap().clone();
+        let mut steps = steps_ref.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if steps.is_empty() {
             steps.push(LgMacroComponent { mouse_button: Some(1), mouse_down: Some(true), vk_code: None, key_down: None, delay_ms: Some(20) });
             steps.push(LgMacroComponent { mouse_button: Some(1), mouse_down: Some(false), vk_code: None, key_down: None, delay_ms: Some(20) });
@@ -689,9 +697,9 @@ pub fn run() {
                     }
         }
 
+        update_ui_macro_list(&macro_model_ref, &settings_arc, &custom_arc);
+        update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
         if let Some(app) = app_weak.upgrade() {
-            update_ui_macro_list(&app, &settings_arc, &custom_arc);
-            update_ui_keybind_list(&app, &keybinds_arc);
             app.set_show_macro_builder(false);
             app.set_status_msg(format!("Макрос '{}' успешно сохранен", name_str).into());
         }
@@ -703,6 +711,8 @@ pub fn run() {
     let settings_arc = lghub_settings.clone();
     let keybinds_arc = keybinds.clone();
     let listener_ref = listener.clone();
+    let macro_model_ref = macro_model.clone();
+    let keybind_model_ref = keybind_model.clone();
     app.on_delete_custom_macro(move |name| {
         if let Ok(mut custom) = custom_arc.lock() {
             let _ = delete_macro(&mut custom, name.as_str());
@@ -721,9 +731,9 @@ pub fn run() {
                 listener_ref.update_bindings(binds.clone());
             }
         }
+        update_ui_macro_list(&macro_model_ref, &settings_arc, &custom_arc);
+        update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
         if let Some(app) = app_weak.upgrade() {
-            update_ui_macro_list(&app, &settings_arc, &custom_arc);
-            update_ui_keybind_list(&app, &keybinds_arc);
             app.set_status_msg(format!("Пользовательский макрос '{}' удален", name).into());
         }
     });
@@ -770,14 +780,15 @@ pub fn run() {
     let app_weak = app.as_weak();
     let keybinds_arc = keybinds.clone();
     let listener_ref = listener.clone();
+    let keybind_model_ref = keybind_model.clone();
     app.on_assign_keybind(move |btn_id, macro_name| {
         if let Ok(mut binds) = keybinds_arc.lock() {
             assign_button_macro(&mut binds, btn_id.as_str(), macro_name.as_str());
             let _ = save_bindings(&binds);
             listener_ref.update_bindings(binds.clone());
         }
+        update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
         if let Some(app) = app_weak.upgrade() {
-            update_ui_keybind_list(&app, &keybinds_arc);
             app.set_show_bind_picker(false);
             app.set_status_msg(format!("Кнопка {} привязана к макросу '{}'", btn_id, macro_name).into());
         }
@@ -787,21 +798,24 @@ pub fn run() {
     let app_weak = app.as_weak();
     let keybinds_arc = keybinds.clone();
     let listener_ref = listener.clone();
+    let keybind_model_ref = keybind_model.clone();
     app.on_clear_keybind(move |btn_id| {
         if let Ok(mut binds) = keybinds_arc.lock() {
             clear_button_macro(&mut binds, btn_id.as_str());
             let _ = save_bindings(&binds);
             listener_ref.update_bindings(binds.clone());
         }
+        update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
         if let Some(app) = app_weak.upgrade() {
-            update_ui_keybind_list(&app, &keybinds_arc);
             app.set_show_bind_picker(false);
             app.set_status_msg(format!("Назначение кнопки {} сброшено на стандартное", btn_id).into());
         }
     });
 
-    // Run Slint Application Loop
-    app.run().expect("Failed to run Slint application");
+    // Run Slint Application Loop (Item 10)
+    if let Err(e) = app.run() {
+        eprintln!("[!] Ошибка выполнения Slint: {e}");
+    }
 
     // Clean up running macro and background listener on window close
     listener.stop();
