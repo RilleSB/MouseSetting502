@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 pub mod hidpp;
 pub mod lghub;
 pub mod ui;
@@ -48,7 +50,7 @@ fn open_g502(api: &HidApi) -> Result<HidppDevice, String> {
 
 fn print_banner() {
     println!("============================================================");
-    println!("   🖱 Mouse Settings 502   ");
+    println!("   Mouse Settings 502   ");
     println!("============================================================");
 }
 
@@ -67,8 +69,25 @@ fn print_help() {
     println!("  ghub_rust --help                Show this help message");
 }
 
+#[cfg(windows)]
+fn attach_console() {
+    unsafe extern "system" {
+        fn AttachConsole(dwProcessId: u32) -> i32;
+    }
+    unsafe {
+        AttachConsole(0xFFFFFFFF);
+    }
+}
+
+#[cfg(not(windows))]
+fn attach_console() {}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let is_gui = args.len() == 1 || (args.len() > 1 && (args[1] == "--gui" || args[1] == "--autostart"));
+    if !is_gui {
+        attach_console();
+    }
 
     // 1. Check --help first without needing mouse connected!
     if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
@@ -122,7 +141,7 @@ fn main() {
             let status = if b.assigned_macro.is_empty() {
                 format!("(Default: {})", b.default_action)
             } else {
-                format!("-> ⚡ MACRO: '{}'", b.assigned_macro)
+                format!("-> MACRO: '{}'", b.assigned_macro)
             };
             println!("  Button {:<26} {}", b.button_label, status);
         }
