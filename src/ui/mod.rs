@@ -5,6 +5,7 @@ mod device_connection;
 mod device_runtime;
 mod binding_persistence;
 mod autostart;
+mod tray;
 pub mod updater;
 pub mod macro_controller;
 pub mod keybind_controller;
@@ -34,6 +35,18 @@ pub fn run() {
         Err(e) => {
             eprintln!("[!] Ошибка инициализации MainWindow: {e}");
             return;
+        }
+    };
+
+    // The window's close button should keep the application alive in the
+    // notification area. The explicit "Выход" action in the tray menu ends it.
+    app.window().on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+    let tray = match tray::TrayIntegration::new(&app) {
+        Ok(tray) => Some(tray),
+        Err(error) => {
+            eprintln!("[!] Не удалось включить системный трей: {error}");
+            app.set_status_msg("Системный трей недоступен — закрытие завершит окно".into());
+            None
         }
     };
 
@@ -216,10 +229,15 @@ pub fn run() {
         listener: &listener,
     });
 
-    // 8. Run Slint application loop
-    if let Err(e) = app.run() {
+    // 8. Unlike ComponentHandle::run(), keep the event loop alive after the
+    // only window is hidden. This is essential for a notification-area app:
+    // `run()` exits as soon as no window is visible and would drop the tray.
+    if let Err(e) = app.show().and_then(|_| slint::run_event_loop_until_quit()) {
         eprintln!("[!] Ошибка выполнения Slint: {e}");
     }
+
+    // Keep the integration alive until the event loop has actually stopped.
+    drop(tray);
 
     // 9. Clean up running macro and background listener on window close
     drop(device_worker);
