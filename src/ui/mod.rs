@@ -1,6 +1,9 @@
 pub mod bridge;
 pub mod models;
 pub mod device_worker;
+mod device_connection;
+mod device_runtime;
+mod binding_persistence;
 pub mod macro_controller;
 pub mod keybind_controller;
 pub mod profile_controller;
@@ -82,10 +85,10 @@ pub fn run() {
 
     // 6. Start keybind and macro trigger listener by default
     listener.restart();
-    app.set_listener_active(true);
+    app.set_listener_active(listener.is_running());
 
     // 7. Initialize modular controllers
-    init_device_worker(&app, &dpi_presets_model, &dpi_presets, &profiles, &g9_locked);
+    let device_worker = init_device_worker(&app, &dpi_presets_model, &dpi_presets, &profiles, &g9_locked, &listener);
     setup_macro_controller(&MacroControllerContext {
         app: &app,
         macro_model: &macro_model,
@@ -97,7 +100,7 @@ pub fn run() {
         active_macro: &active_macro,
         listener: &listener,
     });
-    setup_keybind_controller(&app, &keybind_model, &keybinds, &listener);
+    setup_keybind_controller(&app, &keybind_model, &keybinds, &listener, &profiles, &profile_model);
     setup_profile_controller(&ProfileControllerContext {
         app: &app,
         profile_model: &profile_model,
@@ -115,6 +118,7 @@ pub fn run() {
     }
 
     // 9. Clean up running macro and background listener on window close
+    drop(device_worker);
     listener.stop();
     let mut slot = active_macro.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, active)) = slot.take() {

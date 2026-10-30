@@ -2,6 +2,7 @@ pub mod name;
 pub mod dpi;
 pub mod rgb;
 pub mod profiles;
+pub mod buttons;
 
 pub use name::get_device_name;
 pub use dpi::{get_current_dpi, set_dpi, get_dpi_range, DpiRange};

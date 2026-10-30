@@ -1,8 +1,11 @@
+import { KeybindRow } from "keybind-row.slint";
+import { MemoryControls } from "memory-controls.slint";
+import { KeyAssignmentEditor } from "key-assignment-editor.slint";
     import { Slider, ScrollView, LineEdit } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import {
     Card, Pill, IconButton, SidebarItem, Modal,
-    MacroRow, StepRow, KeybindRow, ProfileRow,
+    MacroRow, StepRow, ProfileRow,
     SwatchButton, QuickKeyButton, QuickDelayButton
 } from "components.slint";
 
@@ -46,6 +49,7 @@ export struct QuickKeyItem {
         button_label: string,
         default_action: string,
         assigned_macro: string,
+        assigned_label: string,
         is_mouse: bool,
     }
 
@@ -135,6 +139,14 @@ export struct QuickKeyItem {
         in-out property <string> new_profile_name: "";
         in-out property <string> new_profile_desc: "";
         in-out property <bool> g9_locked: true;
+        in-out property <bool> onboard_enabled: false;
+        in-out property <bool> onboard_known: false;
+        in-out property <bool> onboard_busy: false;
+        in-out property <bool> hardware_buttons_ready: false;
+        in-out property <string> picker_error: "";
+        callback set_memory_mode(bool);
+        callback assign_keyboard(string, string);
+        callback next_app_profile();
         in-out property <int> active_onboard_slot: 1;
 
         callback toggle_g9_lock();
@@ -493,7 +505,9 @@ export struct QuickKeyItem {
                                         }
 
                                         Text {
-                                            text: "• Оптический сенсор HERO 25K (100 - 25 600 DPI, шаг 50)\n• Частота опроса: 1000 Гц (1 мс) • Host Mode включен\n• 11 программируемых клавиш • LIGHTSYNC RGB подсветка";
+                                            text: "• Оптический сенсор HERO 25K (100 - 25 600 DPI, шаг 50)\n• "
+                                                + (!root.onboard_known ? "Режим мыши неизвестен" : root.onboard_enabled ? "Внутренняя память включена" : "Программный режим")
+                                                + "\n• 11 программируемых клавиш • LIGHTSYNC RGB подсветка";
                                             font-size: 12px;
                                             color: Theme.text_secondary;
                                         }
@@ -1069,6 +1083,8 @@ export struct QuickKeyItem {
                         // TAB 4: KEYBINDS & BUTTON MAPPING (VISUAL G502)
                         // ==========================================
                         if root.active_tab == 4 : ScrollView {
+                        content-width: self.visible-width;
+                        horizontal-scrollbar-policy: always-off;
                         VerticalLayout {
                             spacing: 12px;
 
@@ -1089,13 +1105,15 @@ export struct QuickKeyItem {
                                         alignment: center;
                                         spacing: 2px;
                                         Text {
-                                            text: "ФОНОВЫЙ ПЕРЕХВАТЧИК КЛАВИШ (LOW-LEVEL WINDOWS HOOK)";
+                                            text: "ПРОГРАММНЫЕ НАЗНАЧЕНИЯ";
                                             font-size: 13px;
                                             font-weight: 800;
                                             color: Theme.text_primary;
                                         }
                                         Text {
-                                            text: "Для макросов: боковые G4/G5, наклоны колеса G10/G11, СКМ G3, клавиши F6..F12. Кнопки G7/G8 меняют DPI в памяти.";
+                                            text: "Клавиши, сочетания и макросы. Для G6–G9 выключите внутреннюю память в профилях.";
+                                            wrap: word-wrap;
+                                            min-width: 0px;
                                             font-size: 11px;
                                             color: Theme.text_secondary;
                                         }
@@ -1111,7 +1129,7 @@ export struct QuickKeyItem {
                                         HorizontalLayout {
                                             padding-left: 14px; padding-right: 14px;
                                             Text {
-                                                text: root.listener_active ? "🟢 ПЕРЕХВАТ ВКЛЮЧЕН" : "⚪ ПЕРЕХВАТ ВЫКЛЮЧЕН";
+                                                text: root.listener_active ? "ВКЛЮЧЕНЫ" : "ВЫКЛЮЧЕНЫ";
                                                 font-size: 12px;
                                                 font-weight: 800;
                                                 color: root.listener_active ? Theme.app_bg : Theme.text_secondary;
@@ -1127,7 +1145,7 @@ export struct QuickKeyItem {
 
                             // Visual G502 Layout Header
                             Text {
-                                text: "Интерактивная карта кнопок Logitech G502 HERO & Горячие клавиши:";
+                                text: "Кнопки G502 HERO и горячие клавиши";
                                 font-size: 13px;
                                 font-weight: 700;
                                 color: Theme.text_white_dim;
@@ -1144,16 +1162,10 @@ export struct QuickKeyItem {
                                         button_label: item.button_label;
                                         default_action: item.default_action;
                                         assigned_macro: item.assigned_macro;
+                                        assigned_label: item.assigned_label;
                                         is_mouse: item.is_mouse;
                                         assign => {
-                                            if item.button_id == "G9" {
-                                                root.active_tab = 5;
-                                            } else {
-                                                root.picker_button_id = item.button_id;
-                                                root.picker_button_name = item.button_label;
-                                                root.show_bind_picker = true;
-                                                root.open_keybind_picker(item.button_id, item.button_label);
-                                            }
+                                            root.open_keybind_picker(item.button_id, item.button_label);
                                         }
                                         clear => { root.clear_keybind(item.button_id); }
                                     }
@@ -1216,121 +1228,16 @@ export struct QuickKeyItem {
                                 }
                             }
 
-                            // Hardware Onboard Memory & G9 Button Control Card
-                            Rectangle {
-                                border-radius: 10px;
-                                background: Theme.card_bg_subtle;
-                                border-width: 1px;
-                                border-color: root.g9_locked ? Theme.warning : Theme.accent_border;
-
-                                VerticalLayout {
-                                    padding: 16px;
-                                    spacing: 12px;
-
-                                    HorizontalLayout {
-                                        alignment: space-between;
-
-                                        HorizontalLayout {
-                                            spacing: 12px;
-                                            alignment: start;
-
-                                            Rectangle {
-                                                width: 44px;
-                                                height: 36px;
-                                                border-radius: Theme.radius_md;
-                                                background: root.g9_locked ? Theme.warning_subtle : Theme.accent_light;
-                                                border-width: 1px;
-                                                border-color: root.g9_locked ? Theme.warning : Theme.accent_border;
-
-                                                Text {
-                                                    text: "G9";
-                                                    font-size: Theme.font_body;
-                                                    font-weight: 800;
-                                                    color: root.g9_locked ? Theme.warning : Theme.accent;
-                                                    horizontal-alignment: center;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-
-                                            VerticalLayout {
-                                                alignment: center;
-                                                spacing: 2px;
-                                                Text {
-                                                    text: "Аппаратная память мыши G502 & Кнопка G9 (Profile Cycle)";
-                                                    font-size: 14px;
-                                                    font-weight: 800;
-                                                    color: Theme.text_primary;
-                                                }
-                                                Text {
-                                                    text: root.g9_locked
-                                                        ? "🔒 Кнопка G9 заблокирована: профиль зафиксирован, случайные нажатия не переключают память."
-                                                        : "🔄 Кнопка G9 синхронизирована: физическое нажатие переключает профили из списка выше (Слот " + root.active_onboard_slot + ").";
-                                                    font-size: 11px;
-                                                    color: root.g9_locked ? Theme.warning : Theme.accent;
-                                                }
-                                            }
-                                        }
-
-                                        HorizontalLayout {
-                                            spacing: 10px;
-                                            alignment: center;
-
-                                            // Toggle G9 Lock button
-                                            Rectangle {
-                                                height: 36px;
-                                                border-radius: 6px;
-                                                background: root.g9_locked ? Theme.warning : Theme.surface_elevated;
-                                                border-width: 1px;
-                                                border-color: root.g9_locked ? Theme.warning : Theme.border_btn;
-
-                                                HorizontalLayout {
-                                                    padding-left: 14px;
-                                                    padding-right: 14px;
-                                                    spacing: 6px;
-                                                    alignment: center;
-                                                    Text {
-                                                        text: root.g9_locked ? "🔒 G9 ЗАБЛОКИРОВАНА" : "🔄 G9 СИНХРОНИЗИРОВАНА";
-                                                        font-size: 11px;
-                                                        font-weight: 800;
-                                                        color: root.g9_locked ? Theme.app_bg : Theme.text_primary;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
-                                                TouchArea {
-                                                    mouse-cursor: pointer;
-                                                    clicked => { root.toggle_g9_lock(); }
-                                                }
-                                            }
-
-                                            // Sync All Slots button
-                                            Rectangle {
-                                                height: 36px;
-                                                border-radius: 6px;
-                                                background: Theme.surface_btn;
-                                                border-width: 1px;
-                                                border-color: Theme.border_btn_hover;
-
-                                                HorizontalLayout {
-                                                    padding-left: 14px;
-                                                    padding-right: 14px;
-                                                    spacing: 6px;
-                                                    alignment: center;
-                                                    Text {
-                                                        text: "⚡ СИНХРОНИЗИРОВАТЬ ПАМЯТЬ G502";
-                                                        font-size: 11px;
-                                                        font-weight: 800;
-                                                        color: Theme.accent;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
-                                                TouchArea {
-                                                    mouse-cursor: pointer;
-                                                    clicked => { root.sync_all_onboard_memory(); }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            MemoryControls {
+                                connected: root.device_connected;
+                                known: root.onboard_known;
+                                busy: root.onboard_busy;
+                                onboard: root.onboard_enabled;
+                                g9-locked: root.g9_locked;
+                                buttons-ready: root.hardware_buttons_ready;
+                                slot: root.active_onboard_slot;
+                                change-mode(value) => { root.set_memory_mode(value); }
+                                toggle-g9 => { root.toggle_g9_lock(); }
                             }
 
                             // Profiles List Header
@@ -1643,7 +1550,7 @@ export struct QuickKeyItem {
                         VerticalLayout {
                             spacing: 2px;
                             Text {
-                                text: "Назначение макроса на кнопку";
+                                text: "Назначение кнопки";
                                 font-size: 16px;
                                 font-weight: 800;
                                 color: Theme.text_primary;
@@ -1668,6 +1575,11 @@ export struct QuickKeyItem {
                         }
                     }
 
+                    KeyAssignmentEditor {
+                        error: root.picker_error;
+                        assign(chord) => { root.assign_keyboard(root.picker_button_id, chord); }
+                    }
+
                     // Reset to default button
                     Rectangle {
                         height: 36px;
@@ -1689,7 +1601,6 @@ export struct QuickKeyItem {
                             mouse-cursor: pointer;
                             clicked => {
                                 root.clear_keybind(root.picker_button_id);
-                                root.show_bind_picker = false;
                             }
                         }
                     }
@@ -1722,7 +1633,6 @@ export struct QuickKeyItem {
                                 mouse-cursor: pointer;
                                 clicked => {
                                     root.assign_keybind(root.picker_button_id, "__DPI_DOWN__");
-                                    root.show_bind_picker = false;
                                 }
                             }
                         }
@@ -1745,7 +1655,6 @@ export struct QuickKeyItem {
                                 mouse-cursor: pointer;
                                 clicked => {
                                     root.assign_keybind(root.picker_button_id, "__DPI_UP__");
-                                    root.show_bind_picker = false;
                                 }
                             }
                         }
@@ -1760,7 +1669,8 @@ export struct QuickKeyItem {
 
                     // Available macros list
                     ScrollView {
-                        height: 250px;
+                        vertical-stretch: 1;
+                        min-height: 0px;
                         VerticalLayout {
                             spacing: 6px;
 
@@ -1794,7 +1704,6 @@ export struct QuickKeyItem {
                                     mouse-cursor: pointer;
                                     clicked => {
                                         root.assign_keybind(root.picker_button_id, m.name);
-                                        root.show_bind_picker = false;
                                     }
                                 }
                             }

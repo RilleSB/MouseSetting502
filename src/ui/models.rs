@@ -57,9 +57,16 @@ pub fn update_ui_keybind_list(
         for b in binds.iter() {
             items.push(KeybindItem {
                 button_id: b.button_id.clone().into(),
-                button_label: b.button_label.clone().into(),
+                button_label: match b.button_id.as_str() {
+                    "G6" => "G6 • Снайпер / DPI Shift".into(),
+                    "G7" => "G7 • Кнопка DPI вниз".into(),
+                    "G8" => "G8 • Кнопка DPI вверх".into(),
+                    "G9" => "G9 • Кнопка за колесом".into(),
+                    _ => b.button_label.clone().into(),
+                },
                 default_action: b.default_action.clone().into(),
                 assigned_macro: b.assigned_macro.clone().into(),
+                assigned_label: crate::lghub::button_actions::action_label(&b.assigned_macro).into(),
                 is_mouse: b.is_mouse_button,
             });
         }

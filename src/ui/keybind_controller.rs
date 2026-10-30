@@ -1,111 +1,80 @@
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use slint::{ComponentHandle, VecModel};
-
-use super::bridge::{MainWindow, KeybindItem};
-use super::models::update_ui_keybind_list;
-use crate::lghub::keybinds::{
-    ButtonBinding, KeybindListener, assign_button_macro,
-    clear_button_macro, save_bindings,
-};
+use super::bridge::{MainWindow, KeybindItem, ProfileItem};
+use super::models::{update_ui_keybind_list, update_ui_profile_list};
+use crate::lghub::{AppProfile, get_active_profile_id};
+use crate::lghub::button_actions::{encode_chord, action_label};
+use crate::lghub::keybinds::{ButtonBinding, KeybindListener};
 
 pub fn setup_keybind_controller(
-    app: &MainWindow,
-    keybind_model: &Rc<VecModel<KeybindItem>>,
-    keybinds: &Arc<Mutex<Vec<ButtonBinding>>>,
-    listener: &Arc<KeybindListener>,
+    app: &MainWindow, keybind_model: &Rc<VecModel<KeybindItem>>,
+    keybinds: &Arc<Mutex<Vec<ButtonBinding>>>, listener: &Arc<KeybindListener>,
+    profiles: &Arc<Mutex<Vec<AppProfile>>>, profile_model: &Rc<VecModel<ProfileItem>>,
 ) {
-    // Keybinding Listener Toggle (Explicit trigger on button click)
-    let app_weak = app.as_weak();
+    let weak = app.as_weak();
     let listener_ref = listener.clone();
-    let keybinds_arc = keybinds.clone();
+    let binds = keybinds.clone();
     app.on_toggle_listener(move || {
-        // If enabling, ensure bindings are up to date
-        if !listener_ref.is_running()
-            && let Ok(binds) = keybinds_arc.lock() {
-                listener_ref.update_bindings(binds.clone());
-            }
-        let now_running = listener_ref.toggle();
-        if let Some(app) = app_weak.upgrade() {
-            app.set_listener_active(now_running);
-            if now_running {
-                app.set_status_msg("Фоновый перехватчик клавиш (Windows Hook) включен".into());
-            } else {
-                app.set_status_msg("Фоновый перехватчик клавиш отключен".into());
-            }
+        if !listener_ref.is_running() && let Ok(binds) = binds.lock() { listener_ref.update_bindings(binds.clone()); }
+        let running = listener_ref.toggle();
+        if let Some(app) = weak.upgrade() {
+            app.set_listener_active(running);
+            app.set_status_msg(if running { "Программные назначения включены" } else { "Программные назначения выключены" }.into());
         }
     });
 
-    // Open/Close Keybind Picker
-    let app_weak = app.as_weak();
-    app.on_open_keybind_picker(move |btn_id, btn_label| {
-        if let Some(app) = app_weak.upgrade() {
-            app.set_picker_button_id(btn_id);
-            app.set_picker_button_name(btn_label);
+    let weak = app.as_weak();
+    app.on_open_keybind_picker(move |id, label| {
+        if let Some(app) = weak.upgrade() {
+            app.set_picker_button_id(id);
+            app.set_picker_button_name(label);
+            app.set_picker_error("".into());
             app.set_show_bind_picker(true);
         }
     });
+    let weak = app.as_weak();
+    app.on_close_keybind_picker(move || { if let Some(app) = weak.upgrade() { app.set_show_bind_picker(false); } });
 
-    let app_weak = app.as_weak();
-    app.on_close_keybind_picker(move || {
-        if let Some(app) = app_weak.upgrade() {
-            app.set_show_bind_picker(false);
-        }
-    });
-
-    // Assign Keybind
-    let app_weak = app.as_weak();
-    let keybinds_arc = keybinds.clone();
-    let listener_ref = listener.clone();
-    let keybind_model_ref = keybind_model.clone();
-    app.on_assign_keybind(move |btn_id, macro_name| {
-        let btn_str = btn_id.as_str().trim();
-        let macro_str = macro_name.as_str().trim();
-        if btn_str.is_empty() {
-            eprintln!("[-] Warning: assign_keybind called with empty button_id");
+    let weak = app.as_weak();
+    let binds = keybinds.clone();
+    let listener = listener.clone();
+    let model = keybind_model.clone();
+    let profiles = profiles.clone();
+    let profile_model = profile_model.clone();
+    app.on_assign_keybind(move |id, action| {
+        let Some(app) = weak.upgrade() else { return; };
+        let id = id.trim();
+        if !action.is_empty() && matches!(id, "G6" | "G7" | "G8" | "G9")
+            && (!app.get_onboard_known() || app.get_onboard_enabled() || !app.get_hardware_buttons_ready()) {
+            app.set_picker_error("Для G6–G9 подключите мышь и выключите внутреннюю память во вкладке профилей.".into());
             return;
         }
-
-        let assigned = if let Ok(mut binds) = keybinds_arc.lock() {
-            let res = assign_button_macro(&mut binds, btn_str, macro_str);
-            let _ = save_bindings(&binds);
-            listener_ref.update_bindings(binds.clone());
-            res
-        } else {
-            false
-        };
-
-        update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
-
-        if let Some(app) = app_weak.upgrade() {
-            app.set_show_bind_picker(false);
-            if assigned {
-                println!("[+] Keybind assigned: button '{}' -> macro '{}'", btn_str, macro_str);
-                app.set_status_msg(format!("Кнопка {} привязана к макросу '{}'", btn_str, macro_str).into());
-            } else {
-                eprintln!("[-] Warning: button '{}' not found in keybindings list", btn_str);
-                app.set_status_msg(format!("Ошибка: кнопка {} не найдена", btn_str).into());
+        match super::binding_persistence::store_assignment(id, action.as_str(), &binds, &profiles, &listener) {
+            Ok(()) => {
+                update_ui_keybind_list(&model, &binds);
+                if let Ok(profiles) = profiles.lock() { update_ui_profile_list(&profile_model, &profiles, &get_active_profile_id()); }
+                app.set_show_bind_picker(false);
+                let label = if action.is_empty() { "Стандартное действие".into() } else { action_label(action.as_str()) };
+                let suffix = if listener.is_running() { "" } else { " (перехватчик выключен)" };
+                app.set_status_msg(format!("{id}: {label}{suffix}").into());
+            }
+            Err(error) => {
+                app.set_picker_error(error.clone().into());
+                app.set_status_msg(format!("Назначение не сохранено: {error}").into());
             }
         }
     });
 
-    // Clear Keybind
-    let app_weak = app.as_weak();
-    let keybinds_arc = keybinds.clone();
-    let listener_ref = listener.clone();
-    let keybind_model_ref = keybind_model.clone();
-    app.on_clear_keybind(move |btn_id| {
-        let btn_str = btn_id.as_str().trim();
-        if let Ok(mut binds) = keybinds_arc.lock() {
-            clear_button_macro(&mut binds, btn_str);
-            let _ = save_bindings(&binds);
-            listener_ref.update_bindings(binds.clone());
-        }
-        update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
-        if let Some(app) = app_weak.upgrade() {
-            app.set_show_bind_picker(false);
-            println!("[*] Keybind cleared for button '{}'", btn_str);
-            app.set_status_msg(format!("Назначение кнопки {} сброшено на стандартное", btn_str).into());
+    let weak = app.as_weak();
+    app.on_assign_keyboard(move |id, text| {
+        if let Some(app) = weak.upgrade() {
+            match encode_chord(text.as_str()) {
+                Ok(action) => app.invoke_assign_keybind(id, action.into()),
+                Err(error) => app.set_picker_error(error.into()),
+            }
         }
     });
+    let weak = app.as_weak();
+    app.on_clear_keybind(move |id| { if let Some(app) = weak.upgrade() { app.invoke_assign_keybind(id, "".into()); } });
 }

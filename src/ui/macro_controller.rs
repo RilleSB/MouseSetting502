@@ -28,6 +28,13 @@ pub fn setup_macro_triggers(
     let app_weak = app.as_weak();
 
     listener.set_callback(move |macro_name: String| {
+        if macro_name == "__PROFILE_NEXT__" {
+            let weak = app_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = weak.upgrade() { app.invoke_next_app_profile(); }
+            });
+            return;
+        }
         if macro_name == "__DPI_DOWN__" {
             let weak = app_weak.clone();
             let _ = slint::invoke_from_event_loop(move || {

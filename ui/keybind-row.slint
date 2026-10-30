@@ -1,0 +1,116 @@
+import { Theme } from "theme.slint";
+
+export component KeybindRow inherits Rectangle {
+    in property <string> button_id: "";
+    in property <string> button_label: "";
+    in property <string> default_action: "";
+    in property <string> assigned_macro: "";
+    in property <bool> is_mouse: false;
+    in property <string> assigned_label: "";
+    callback assign();
+    callback clear();
+
+    height: 52px;
+    min-width: 0px;
+    border-radius: Theme.radius_base;
+    background: root.assigned_macro != "" ? Theme.success_subtle : Theme.card_bg_subtle;
+    border-width: 1px;
+    border-color: root.assigned_macro != "" ? Theme.success_border : Theme.border_subtle;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+            horizontal-stretch: 1;
+            min-width: 0px;
+
+            // Button badge
+            Rectangle {
+                width: 44px;
+                height: 30px;
+                border-radius: Theme.radius_md;
+                background: root.is_mouse ? Theme.accent_light : Theme.purple_subtle;
+                border-width: 1px;
+                border-color: root.is_mouse ? Theme.accent_border : Theme.purple_border;
+
+                Text {
+                    text: root.button_id;
+                    font-size: Theme.font_body_sm;
+                    font-weight: 800;
+                    color: root.is_mouse ? Theme.accent : Theme.purple_text;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                min-width: 0px;
+                spacing: 2px;
+                Text {
+                    min-width: 0px;
+                    overflow: elide;
+                    text: root.button_label;
+                    font-size: Theme.font_body;
+                    font-weight: 700;
+                    color: Theme.text_primary;
+                }
+                Text {
+                    min-width: 0px;
+                    overflow: elide;
+                    text: root.assigned_macro == "__DPI_DOWN__" ? "🎯 ДЕЙСТВИЕ: DPI Вниз (Предыдущий пресет)" :
+                          root.assigned_macro == "__DPI_UP__" ? "🎯 ДЕЙСТВИЕ: DPI Вверх (Следующий пресет)" :
+                          root.assigned_macro != "" ? ("Назначено: " + root.assigned_label) : ("По умолчанию: " + root.default_action);
+                    font-size: Theme.font_caption;
+                    font-weight: 600;
+                    color: root.assigned_macro != "" ? Theme.success : Theme.text_subtle;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 8px;
+            alignment: center;
+
+            // Assign button
+            Rectangle {
+                height: 32px;
+                border-radius: Theme.radius_md;
+                background: Theme.surface_btn;
+                border-width: 1px;
+                border-color: Theme.border_btn_hover;
+
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px;
+                    alignment: center;
+                    Text {
+                        text: root.assigned_macro != "" ? "ИЗМЕНИТЬ" : "НАЗНАЧИТЬ";
+                        font-size: Theme.font_caption;
+                        font-weight: 800;
+                        color: root.assigned_macro != "" ? Theme.success : Theme.accent;
+                        vertical-alignment: center;
+                    }
+                }
+                TouchArea { clicked => { root.assign(); } }
+            }
+
+            // Reset to default button
+            if root.assigned_macro != "" : Rectangle {
+                width: 32px; height: 32px;
+                border-radius: Theme.radius_md;
+                background: Theme.error_btn_bg;
+                border-width: 1px;
+                border-color: Theme.error_border;
+                Text { text: "↺"; font-size: Theme.font_md; font-weight: 800; color: Theme.error_bright; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.clear(); } }
+            }
+        }
+    }
+}
+

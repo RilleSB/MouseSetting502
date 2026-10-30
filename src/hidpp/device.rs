@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -10,6 +10,7 @@ pub struct HidppDevice {
     feature_cache: Mutex<HashMap<u16, u8>>,
     device_idx: u8,
     sw_id_counter: AtomicU8,
+    notifications: Mutex<VecDeque<HidppPacket>>,
 }
 
 impl HidppDevice {
@@ -19,6 +20,7 @@ impl HidppDevice {
             feature_cache: Mutex::new(HashMap::new()),
             device_idx,
             sw_id_counter: AtomicU8::new(1),
+            notifications: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -56,8 +58,8 @@ impl HidppDevice {
             if incoming.is_response_to(packet) {
                 incoming.check_error()?;
                 return Ok(incoming);
-            } else {
-                // Asynchronous notification or alien response from G HUB -> ignore and keep waiting
+            } else if incoming.device_idx == self.device_idx && incoming.software_id == 0 && incoming.feature_idx != 0xff {
+                self.notifications.lock().unwrap_or_else(|e| e.into_inner()).push_back(incoming);
             }
         }
 
@@ -71,6 +73,20 @@ impl HidppDevice {
         let sw_id = self.next_sw_id();
         let req = HidppPacket::new_long(self.device_idx, feature_idx, function_id, sw_id, params)?;
         self.send_request(&req, Duration::from_millis(800))
+    }
+
+    /// Requests and event reads use the same lock, preserving notification order.
+    pub fn read_notification(&self, timeout_ms: i32) -> Result<Option<HidppPacket>, String> {
+        let dev = self.device.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(packet) = self.notifications.lock().unwrap_or_else(|e| e.into_inner()).pop_front() {
+            return Ok(Some(packet));
+        }
+        let mut buf = [0u8; 64];
+        let n = dev.read_timeout(&mut buf, timeout_ms.clamp(0, 50))
+            .map_err(|e| format!("HID read error: {e}"))?;
+        if n == 0 { return Ok(None); }
+        Ok(HidppPacket::from_bytes(&buf[..n]).ok().filter(|packet|
+            packet.device_idx == self.device_idx && packet.software_id == 0 && packet.feature_idx != 0xff))
     }
 
     pub fn get_feature_index(&self, feature_id: u16) -> Result<u8, String> {

@@ -86,7 +86,7 @@ impl HidppPacket {
     /// Checks if this packet is a response to the given request.
     /// In HID++ 2.0:
     /// - Normal response matches: dev_idx, feature_idx, and function/software ID byte.
-    /// - Error response has: feature_idx == 0xFF, params[0] == orig_feat_idx, params[1] == orig_func_sw.
+    /// - Error responses store the original feature at byte 3, then function/software ID and error.
     pub fn is_response_to(&self, req: &HidppPacket) -> bool {
         if self.device_idx != req.device_idx {
             return false;
@@ -101,9 +101,9 @@ impl HidppPacket {
         }
 
         // 2. Error response: [report_id, dev_idx, 0xFF, orig_feat, orig_func_sw, error_code, ...]
-        if self.feature_idx == 0xFF && self.params.len() >= 3 {
-            let orig_feat = self.params[0];
-            let orig_func_sw = self.params[1];
+        if self.feature_idx == 0xFF && self.params.len() >= 2 {
+            let orig_feat = (self.function_id << 4) | self.software_id;
+            let orig_func_sw = self.params[0];
             return orig_feat == req.feature_idx && orig_func_sw == req_func_sw;
         }
 
@@ -112,11 +112,11 @@ impl HidppPacket {
 
     /// If this is an error response, returns (feature_idx, func_id, software_id, error_code, error_desc)
     pub fn check_error(&self) -> Result<(), String> {
-        if self.feature_idx == 0xFF && self.params.len() >= 3 {
-            let orig_feat = self.params[0];
-            let orig_func = self.params[1] >> 4;
-            let orig_sw = self.params[1] & 0x0F;
-            let err_code = self.params[2];
+        if self.feature_idx == 0xFF && self.params.len() >= 2 {
+            let orig_feat = (self.function_id << 4) | self.software_id;
+            let orig_func = self.params[0] >> 4;
+            let orig_sw = self.params[0] & 0x0F;
+            let err_code = self.params[1];
 
             let desc = match err_code {
                 0x01 => "Unknown",
@@ -199,27 +199,13 @@ mod tests {
     #[test]
     fn test_is_response_to_error() {
         let req = HidppPacket::new_long(0xFF, 0x22, 0x03, 0x0A, &[]).unwrap();
-        // Error response: feature_idx=0xFF, params = [orig_feat=0x22, orig_func_sw=0x3A, error_code=0x06]
-        let err_packet = HidppPacket {
-            report_id: 0x11,
-            device_idx: 0xFF,
-            feature_idx: 0xFF,
-            function_id: 0x00,
-            software_id: 0x00,
-            params: vec![0x22, 0x3A, 0x06, 0x00],
-        };
+        // Decode actual wire bytes, including the unusual byte-3 error layout.
+        let err_packet = HidppPacket::from_bytes(&[0x10, 0xff, 0xff, 0x22, 0x3a, 0x06, 0]).unwrap();
         assert!(err_packet.is_response_to(&req));
         assert!(err_packet.check_error().is_err());
 
         // Alien error response (e.g. for feature 0x47)
-        let alien_err = HidppPacket {
-            report_id: 0x11,
-            device_idx: 0xFF,
-            feature_idx: 0xFF,
-            function_id: 0x00,
-            software_id: 0x00,
-            params: vec![0x47, 0x11, 0x06, 0x00],
-        };
+        let alien_err = HidppPacket::from_bytes(&[0x10, 0xff, 0xff, 0x47, 0x11, 0x06, 0]).unwrap();
         assert!(!alien_err.is_response_to(&req));
     }
 }

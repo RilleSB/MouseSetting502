@@ -31,6 +31,18 @@ pub fn setup_profile_controller(ctx: &ProfileControllerContext) {
     let keybinds_arc = ctx.keybinds;
     let listener = ctx.listener;
 
+    let weak = app.as_weak();
+    let profile_list = profiles_arc.clone();
+    app.on_next_app_profile(move || {
+        let active_id = get_active_profile_id();
+        let next = profile_list.lock().ok().and_then(|profiles| {
+            if profiles.is_empty() { return None; }
+            let index = profiles.iter().position(|p| p.id == active_id).unwrap_or(0);
+            Some(profiles[(index + 1) % profiles.len()].id.clone())
+        });
+        if let (Some(app), Some(id)) = (weak.upgrade(), next) { app.invoke_switch_profile(id.into()); }
+    });
+
     // Switch Profile Callback
     let app_weak = app.as_weak();
     let prof_ref = profiles_arc.clone();

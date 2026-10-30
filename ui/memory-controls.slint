@@ -1,0 +1,97 @@
+import { Theme } from "theme.slint";
+
+export component MemoryControls inherits Rectangle {
+    in property <bool> connected;
+    in property <bool> known;
+    in property <bool> busy;
+    in property <bool> onboard;
+    in property <bool> g9-locked;
+    in property <bool> buttons-ready;
+    in property <int> slot;
+    callback change-mode(bool);
+    callback toggle-g9();
+    vertical-stretch: 0;
+    border-radius: Theme.radius_base;
+    background: Theme.card_bg_subtle;
+    border-width: 1px;
+    border-color: Theme.border_default;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 16px;
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: "Внутренняя память G502";
+                    color: Theme.text_primary;
+                    font-size: Theme.font_md;
+                    font-weight: 700;
+                }
+                Text {
+                    text: !root.connected ? "Подключите мышь для изменения режима"
+                        : !root.known ? "Не удалось прочитать режим мыши"
+                        : root.onboard ? "Включена — используются настройки, сохранённые в мыши"
+                        : "Выключена — назначениями управляет это приложение";
+                    color: Theme.text_secondary;
+                    font-size: Theme.font_body_sm;
+                    wrap: word-wrap;
+                }
+            }
+            mode-button := Rectangle {
+                min-width: 150px;
+                height: 36px;
+                background: mode-touch.enabled ? Theme.accent_light : Theme.surface;
+                border-radius: Theme.radius_md;
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px;
+                    Text {
+                        text: root.busy ? "Переключение…" : !root.known ? "Режим неизвестен"
+                            : root.onboard ? "Выключить память" : "Включить память";
+                        font-size: Theme.font_body_sm;
+                        color: mode-touch.enabled ? Theme.accent : Theme.text_muted;
+                        vertical-alignment: center;
+                    }
+                }
+                mode-touch := TouchArea {
+                    enabled: root.connected && root.known && !root.busy;
+                    mouse-cursor: pointer;
+                    clicked => { root.change-mode(!root.onboard); }
+                }
+            }
+        }
+        Text {
+            text: root.onboard ? "Программные назначения G6–G9 доступны при выключенной внутренней памяти."
+                : root.buttons-ready ? "G6–G9: прямой приём нажатий включён. Приложение должно работать."
+                : "Приём G6–G9 недоступен. Подробности — в строке состояния.";
+            color: !root.onboard && !root.buttons-ready ? Theme.warning : Theme.text_secondary;
+            font-size: Theme.font_caption;
+            wrap: word-wrap;
+        }
+        if root.onboard && root.known : HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: "Слот памяти: " + root.slot;
+                color: Theme.text_secondary;
+                font-size: Theme.font_body_sm;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                height: 32px;
+                background: Theme.surface_btn;
+                border-radius: Theme.radius_md;
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px;
+                    Text {
+                        text: root.g9-locked ? "G9: профиль зафиксирован" : "G9: смена профилей";
+                        color: Theme.accent;
+                        font-size: Theme.font_caption;
+                        vertical-alignment: center;
+                    }
+                }
+                TouchArea { enabled: !root.busy; clicked => { root.toggle-g9(); } }
+            }
+        }
+    }
+}

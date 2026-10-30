@@ -1,0 +1,47 @@
+import { LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export component KeyAssignmentEditor inherits Rectangle {
+    in property <string> error;
+    in-out property <string> chord: "";
+    callback assign(string);
+    background: Theme.surface;
+    border-radius: Theme.radius_md;
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        Text {
+            text: "Клавиша или сочетание (Space, Shift, Ctrl+A)";
+            color: Theme.text_secondary;
+            font-size: Theme.font_body_sm;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            LineEdit {
+                text <=> root.chord;
+                placeholder-text: "Например, Ctrl+Shift+A";
+                accepted => { root.assign(root.chord); }
+            }
+            Rectangle {
+                width: 100px;
+                height: 32px;
+                background: Theme.accent;
+                border-radius: Theme.radius_md;
+                Text {
+                    text: "Назначить";
+                    color: Theme.app_bg;
+                    font-size: Theme.font_body_sm;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea { clicked => { root.assign(root.chord); } }
+            }
+        }
+        if root.error != "" : Text {
+            text: root.error;
+            color: Theme.error_text;
+            font-size: Theme.font_caption;
+            wrap: word-wrap;
+        }
+    }
+}
