@@ -2,6 +2,14 @@ use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=icon.ico");
+    let git_hash = Command::new("git")
+        .args(["rev-parse", "--short=8", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|out| if out.status.success() { String::from_utf8(out.stdout).ok() } else { None })
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "release".into());
+    println!("cargo:rustc-env=BUILD_GIT_HASH={git_hash}");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR missing"));
         let icon = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("icon.ico");

@@ -108,6 +108,17 @@ export struct QuickKeyItem {
         in-out property <int> autostart_state: -1;
         in-out property <string> autostart_error: "";
         callback set_autostart(bool);
+        in-out property <string> app_version: "1.0.0";
+        in-out property <string> build_git_hash: "";
+        in-out property <string> local_sha256: "";
+        in-out property <int> update_status_kind: 0;
+        in-out property <string> update_status_msg: "Нажмите «Проверить обновления», чтобы сравнить локальную сборку с GitHub Releases.";
+        in-out property <string> remote_tag: "";
+        in-out property <string> remote_sha256: "";
+        in-out property <string> release_url: "";
+        callback check_for_updates();
+        callback open_releases_page();
+        callback open_github_repo();
         in-out property <string> device_name: "Поиск мыши G502 HERO...";
         in-out property <bool> device_connected: false;
         in-out property <string> headset_name: "Logitech G435 Lightspeed";
@@ -284,6 +295,13 @@ export struct QuickKeyItem {
                             icon_size: 11px;
                             btn_width: 80px;
                             clicked => { root.active_tab = 6; }
+                        }
+
+                        IconButton {
+                            icon: "GitHub";
+                            icon_size: 11px;
+                            btn_width: 68px;
+                            clicked => { root.open_github_repo(); }
                         }
 
                         // Mouse status pill
@@ -1181,6 +1199,17 @@ export struct QuickKeyItem {
                             startup-state: root.autostart_state;
                             startup-error: root.autostart_error;
                             set-startup(enabled) => { root.set_autostart(enabled); }
+                            app-version: root.app_version;
+                            build-git-hash: root.build_git_hash;
+                            local-sha256: root.local_sha256;
+                            update-status-kind: root.update_status_kind;
+                            update-status-msg: root.update_status_msg;
+                            remote-tag: root.remote_tag;
+                            remote-sha256: root.remote_sha256;
+                            release-url: root.release_url;
+                            check-update => { root.check_for_updates(); }
+                            open-releases => { root.open_releases_page(); }
+                            open-repository => { root.open_github_repo(); }
                         }
 
                         // ==========================================

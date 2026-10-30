@@ -1484,7 +1484,7 @@ dependencies = [
 
 [[package]]
 name = "ghub_rust"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "hidapi",
  "rusqlite",
@@ -1492,6 +1492,7 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "webbrowser",
  "windows-sys 0.61.2",
 ]
 

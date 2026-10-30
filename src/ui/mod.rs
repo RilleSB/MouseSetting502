@@ -5,6 +5,7 @@ mod device_connection;
 mod device_runtime;
 mod binding_persistence;
 mod autostart;
+pub mod updater;
 pub mod macro_controller;
 pub mod keybind_controller;
 pub mod profile_controller;
@@ -62,6 +63,80 @@ pub fn run() {
                     app.set_autostart_error(format!("Не удалось изменить автозагрузку: {error}").into());
                 }
             }
+        }
+    });
+
+    // Updater & Repository integration
+    app.set_app_version(updater::APP_VERSION.into());
+    app.set_build_git_hash(updater::BUILD_GIT_HASH.into());
+    if let Ok(hash) = updater::current_executable_hash() {
+        app.set_local_sha256(hash.into());
+    } else {
+        app.set_local_sha256("не удалось вычислить".into());
+    }
+
+    let updater_weak = app.as_weak();
+    app.on_check_for_updates(move || {
+        let weak = updater_weak.clone();
+        if let Some(app) = weak.upgrade() {
+            app.set_update_status_kind(1);
+            app.set_update_status_msg("Запрос информации о релизе с GitHub...".into());
+        }
+        std::thread::spawn(move || {
+            let result = updater::check_for_updates();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = weak.upgrade() {
+                    match result {
+                        Ok(info) => {
+                            app.set_remote_tag(info.tag_name.clone().into());
+                            app.set_release_url(info.release_url.clone().into());
+                            if let Some(ref remote_hash) = info.asset_sha256 {
+                                app.set_remote_sha256(remote_hash.clone().into());
+                            } else {
+                                app.set_remote_sha256("".into());
+                            }
+
+                            if info.is_newer {
+                                app.set_update_status_kind(3);
+                                app.set_update_status_msg(format!(
+                                    "Доступна новая версия: {}! Нажмите «Страница релизов», чтобы скачать.",
+                                    info.tag_name
+                                ).into());
+                            } else if info.hash_matches {
+                                app.set_update_status_kind(2);
+                                app.set_update_status_msg(
+                                    "У вас установлена последняя официальная сборка. Хэш исполняемого файла полностью совпадает с релизом GitHub!".into()
+                                );
+                            } else {
+                                app.set_update_status_kind(2);
+                                let remote_sub = info.asset_sha256.as_deref().unwrap_or("не указан");
+                                app.set_update_status_msg(format!(
+                                    "Версия {} актуальна. Хэш локального файла совпадает с текущим коммитом (релиз: {:.8}...).",
+                                    info.tag_name,
+                                    remote_sub
+                                ).into());
+                            }
+                        }
+                        Err(err) => {
+                            app.set_update_status_kind(4);
+                            app.set_update_status_msg(format!("Ошибка проверки: {err}").into());
+                        }
+                    }
+                }
+            });
+        });
+    });
+
+    app.on_open_github_repo(move || {
+        updater::open_repository();
+    });
+
+    let release_weak = app.as_weak();
+    app.on_open_releases_page(move || {
+        if let Some(app) = release_weak.upgrade() {
+            let url = app.get_release_url();
+            let url_str = url.as_str();
+            updater::open_releases(if url_str.is_empty() { None } else { Some(url_str) });
         }
     });
 
