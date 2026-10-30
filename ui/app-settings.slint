@@ -1,0 +1,78 @@
+import { Theme } from "theme.slint";
+
+export component AppSettings inherits Rectangle {
+    // -1: unavailable, 0: off, 1: this executable, 2: another copy, 3: occupied.
+    in property <int> startup-state: -1;
+    in property <string> startup-error: "";
+    callback set-startup(bool);
+    background: Theme.app_bg;
+    VerticalLayout {
+        spacing: 18px;
+        alignment: start;
+        Text { text: "Настройки приложения"; font-size: Theme.font_display; font-weight: 800; color: Theme.text_primary; }
+        Rectangle {
+            border-radius: Theme.radius_lg;
+            background: Theme.card_bg_subtle;
+            border-width: 1px;
+            border-color: Theme.border_card;
+            vertical-stretch: 0;
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text { text: "Автозагрузка с Windows"; font-size: Theme.font_lg; font-weight: 700; color: Theme.text_primary; }
+                Text {
+                    text: root.startup-state == 1 ? "Включена для этого файла приложения."
+                        : root.startup-state == 2 ? "Включена для другой копии приложения."
+                        : root.startup-state == 3 ? "Имя записи занято другой программой."
+                        : root.startup-state == 0 ? "Выключена."
+                        : "Не удалось прочитать состояние автозагрузки.";
+                    color: root.startup-state == 1 ? Theme.success : Theme.text_secondary;
+                    font-size: Theme.font_body;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "После входа в Windows откроется окно приложения. Если переместите EXE, включите автозагрузку заново.";
+                    color: Theme.text_secondary;
+                    font-size: Theme.font_body_sm;
+                    wrap: word-wrap;
+                }
+                if root.startup-error != "" : Text {
+                    text: root.startup-error;
+                    color: Theme.error_text;
+                    font-size: Theme.font_body_sm;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 10px;
+                    if root.startup-state >= 0 && root.startup-state <= 2 : Rectangle {
+                        height: 36px;
+                        border-radius: Theme.radius_md;
+                        background: root.startup-state == 1 ? Theme.surface_btn : Theme.accent;
+                        HorizontalLayout {
+                            padding-left: 14px; padding-right: 14px;
+                            Text {
+                                text: root.startup-state == 1 ? "Выключить" : root.startup-state == 2 ? "Использовать этот файл" : "Включить";
+                                color: root.startup-state == 1 ? Theme.text_primary : Theme.app_bg;
+                                font-size: Theme.font_body_sm;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                        TouchArea { mouse-cursor: pointer; clicked => { root.set-startup(root.startup-state != 1); } }
+                    }
+                    if root.startup-state == 2 : Rectangle {
+                        height: 36px;
+                        border-radius: Theme.radius_md;
+                        background: Theme.surface_btn;
+                        HorizontalLayout {
+                            padding-left: 14px; padding-right: 14px;
+                            Text { text: "Выключить автозагрузку"; color: Theme.text_primary; font-size: Theme.font_body_sm; vertical-alignment: center; }
+                        }
+                        TouchArea { mouse-cursor: pointer; clicked => { root.set-startup(false); } }
+                    }
+                }
+            }
+        }
+    }
+}

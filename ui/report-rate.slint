@@ -1,0 +1,63 @@
+import { Theme } from "theme.slint";
+
+export component ReportRate inherits Rectangle {
+    in property <[int]> intervals: [];
+    in property <int> current: 0;
+    in property <bool> busy: false;
+    in property <bool> connected: false;
+    in property <bool> onboard: false;
+    in property <bool> mode-known: false;
+    callback select(int);
+    vertical-stretch: 0;
+    min-height: 112px;
+    border-radius: Theme.radius_base;
+    background: Theme.card_bg_subtle;
+    border-width: 1px;
+    border-color: Theme.border_card;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        Text {
+            text: "Частота опроса";
+            font-size: Theme.font_md;
+            font-weight: 700;
+            color: Theme.text_primary;
+        }
+        Text {
+            text: !root.connected ? "Подключите мышь, чтобы узнать доступные частоты."
+                : root.intervals.length == 0 ? "Мышь не сообщила поддерживаемые частоты."
+                : !root.mode-known ? "Не удалось определить режим мыши."
+                : root.onboard ? "Для изменения выключите внутреннюю память во вкладке профилей."
+                : "Как часто мышь передаёт данные компьютеру.";
+            font-size: Theme.font_body_sm;
+            color: Theme.text_secondary;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+            for interval in root.intervals : Rectangle {
+                width: 90px;
+                height: 34px;
+                border-radius: Theme.radius_md;
+                background: root.current == interval ? Theme.accent : Theme.surface_alt;
+                border-width: 1px;
+                border-color: root.current == interval ? Theme.accent : Theme.border_btn;
+                Text {
+                    text: Math.round(1000 / interval) + " Гц";
+                    font-size: Theme.font_body_sm;
+                    font-weight: 700;
+                    color: root.current == interval ? Theme.app_bg : Theme.text_primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea {
+                    enabled: root.connected && root.mode-known && !root.onboard && !root.busy;
+                    mouse-cursor: pointer;
+                    clicked => { root.select(interval); }
+                }
+            }
+        }
+    }
+}

@@ -1,3 +1,6 @@
+import { ReportRate } from "report-rate.slint";
+import { AppSettings } from "app-settings.slint";
+import { MouseMap } from "mouse-map.slint";
 import { KeybindRow } from "keybind-row.slint";
 import { MemoryControls } from "memory-controls.slint";
 import { KeyAssignmentEditor } from "key-assignment-editor.slint";
@@ -54,7 +57,8 @@ export struct QuickKeyItem {
     }
 
     export component MainWindow inherits Window {
-        title: "Logitech G HUB (Rust Edition)";
+        title: "Mouse Settings 502";
+        icon: @image-url("assets/app-icon.png");
         min-width: 1040px;
         min-height: 700px;
         preferred-width: 1080px;
@@ -63,12 +67,9 @@ export struct QuickKeyItem {
         default-font-family: "Segoe UI";
 
         in property <[TabItem]> tabs: [
-            { id: 0, title: "🖥️  Обзор устройств" },
-            { id: 1, title: "🎯  Сенсор & DPI" },
-            { id: 2, title: "✨  Подсветка LIGHTSYNC" },
-            { id: 3, title: "⚡  Студия макросов" },
-            { id: 4, title: "🎛️  Назначение клавиш" },
-            { id: 5, title: "📁  Профили настроек" },
+            { id: 1, title: "🎯  Чувствительность DPI" },
+            { id: 4, title: "🎛️  Назначения" },
+            { id: 2, title: "✨  Подсветка" },
         ];
 
         in property <[SwatchItem]> swatches: [
@@ -103,12 +104,19 @@ export struct QuickKeyItem {
 
         in property <[int]> quick_delays: [10, 25, 50, 100, 250];
 
-        in-out property <int> active_tab: 0;
+        in-out property <int> active_tab: 1;
+        in-out property <int> autostart_state: -1;
+        in-out property <string> autostart_error: "";
+        callback set_autostart(bool);
         in-out property <string> device_name: "Поиск мыши G502 HERO...";
         in-out property <bool> device_connected: false;
         in-out property <string> headset_name: "Logitech G435 Lightspeed";
         in-out property <bool> headset_connected: false;
         in-out property <int> current_dpi: 800;
+        in-out property <[int]> report_rate_intervals: [];
+        in-out property <int> report_rate_interval: 0;
+        in-out property <bool> report_rate_busy: false;
+        callback set_report_rate(int);
         in-out property <string> status_msg: "Готово к работе";
         in-out property <color> current_color: Theme.accent;
         in-out property <string> active_macro_name: "";
@@ -222,13 +230,11 @@ export struct QuickKeyItem {
                             border-width: 1px;
                             border-color: Theme.accent_border;
 
-                            Text {
-                                text: "⯛ G";
-                                font-size: 16px;
-                                font-weight: 900;
-                                color: Theme.accent;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            Image {
+                                source: @image-url("assets/app-icon.png");
+                                width: 100%;
+                                height: 100%;
+                                image-fit: contain;
                             }
                         }
 
@@ -239,13 +245,13 @@ export struct QuickKeyItem {
                             HorizontalLayout {
                                 spacing: 8px;
                                 Text {
-                                    text: "LOGITECH G";
+                                    text: "Mouse Settings 502";
                                     font-size: 16px;
                                     font-weight: 800;
                                     color: Theme.text_heading;
                                 }
                                 Text {
-                                    text: "PRO EDITION";
+                                    text: "G502";
                                     font-size: 11px;
                                     font-weight: 700;
                                     color: Theme.accent;
@@ -253,7 +259,7 @@ export struct QuickKeyItem {
                                 }
                             }
                             Text {
-                                text: "LIGHTSPEED NATIVE WORKER • DIRECT HID++ 2.0 • ZERO-LATENCY";
+                                text: "Настройки мыши";
                                 font-size: 10px;
                                 font-weight: 600;
                                 color: Theme.text_muted;
@@ -265,6 +271,20 @@ export struct QuickKeyItem {
                     HorizontalLayout {
                         spacing: 12px;
                         alignment: center;
+
+                        IconButton {
+                            icon: "Обзор";
+                            icon_size: 11px;
+                            btn_width: 64px;
+                            clicked => { root.active_tab = 0; }
+                        }
+
+                        IconButton {
+                            icon: "Настройки";
+                            icon_size: 11px;
+                            btn_width: 80px;
+                            clicked => { root.active_tab = 6; }
+                        }
 
                         // Mouse status pill
                         Pill {
@@ -354,7 +374,7 @@ export struct QuickKeyItem {
 
                             for tab in root.tabs : SidebarItem {
                                 title: tab.title;
-                                active: root.active_tab == tab.id;
+                                active: root.active_tab == tab.id || (tab.id == 4 && root.active_tab == 3);
                                 clicked => { root.active_tab = tab.id; }
                             }
                         }
@@ -422,7 +442,10 @@ export struct QuickKeyItem {
                         // TAB 0: DEVICE OVERVIEW
                         // ==========================================
                         if root.active_tab == 0 : ScrollView {
+                        content-width: self.visible-width;
+                        horizontal-scrollbar-policy: always-off;
                         VerticalLayout {
+                            alignment: center;
                             spacing: 16px;
 
                             Text {
@@ -431,11 +454,14 @@ export struct QuickKeyItem {
                                 font-weight: 800;
                                 color: Theme.text_primary;
                             }
-                            Text {
-                                text: "Аппаратный контроль Logitech HID++ 2.0 без фонового Electron и сбора телеметрии.";
-                                font-size: 13px;
-                                color: Theme.text_secondary;
-                            }
+                            HorizontalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    max-width: 820px;
+                                    horizontal-stretch: 1;
+                                    background: transparent;
+                                    VerticalLayout {
+                                        spacing: 16px;
 
                             // Card 1: G502 HERO
                             Rectangle {
@@ -601,6 +627,9 @@ export struct QuickKeyItem {
                                             font-size: 12px;
                                             color: Theme.text_secondary;
                                         }
+                                    }
+                                }
+                            }
                                     }
                                 }
                             }
@@ -845,6 +874,16 @@ export struct QuickKeyItem {
                                 }
                             }
 
+                            ReportRate {
+                                intervals: root.report_rate_intervals;
+                                current: root.report_rate_interval;
+                                busy: root.report_rate_busy;
+                                connected: root.device_connected;
+                                onboard: root.onboard_enabled;
+                                mode-known: root.onboard_known;
+                                select(interval) => { root.set_report_rate(interval); }
+                            }
+
                             // Slider fine control
                             VerticalLayout {
                                 spacing: 8px;
@@ -1082,97 +1121,67 @@ export struct QuickKeyItem {
                         // ==========================================
                         // TAB 4: KEYBINDS & BUTTON MAPPING (VISUAL G502)
                         // ==========================================
-                        if root.active_tab == 4 : ScrollView {
-                        content-width: self.visible-width;
-                        horizontal-scrollbar-policy: always-off;
-                        VerticalLayout {
-                            spacing: 12px;
-
-                            // Top hook status card
+                        if root.active_tab == 4 : HorizontalLayout {
+                            spacing: 18px;
                             Rectangle {
-                                height: 68px;
-                                border-radius: 10px;
-                                background: Theme.card_bg_subtle;
-                                border-width: 1px;
-                                border-color: root.listener_active ? Theme.success_border : Theme.surface_alt;
-
-                                HorizontalLayout {
-                                    padding-left: 18px;
-                                    padding-right: 18px;
-                                    alignment: space-between;
-
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 2px;
-                                        Text {
-                                            text: "ПРОГРАММНЫЕ НАЗНАЧЕНИЯ";
-                                            font-size: 13px;
-                                            font-weight: 800;
-                                            color: Theme.text_primary;
-                                        }
-                                        Text {
-                                            text: "Клавиши, сочетания и макросы. Для G6–G9 выключите внутреннюю память в профилях.";
-                                            wrap: word-wrap;
-                                            min-width: 0px;
-                                            font-size: 11px;
-                                            color: Theme.text_secondary;
-                                        }
-                                    }
-
+                                width: 350px;
+                                background: Theme.card_bg;
+                                border-radius: Theme.radius_lg;
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 12px;
+                                    Text { text: "Назначения"; color: Theme.text_primary; font-size: Theme.font_title; font-weight: 700; }
+                                    Text { text: "Выберите кнопку мыши на схеме или в списке, чтобы назначить клавишу, DPI или макрос."; color: Theme.text_secondary; font-size: Theme.font_body_sm; wrap: word-wrap; }
                                     Rectangle {
-                                        height: 38px;
-                                        border-radius: 6px;
-                                        background: root.listener_active ? Theme.success : Theme.surface_elevated;
-                                        border-width: 1px;
-                                        border-color: root.listener_active ? Theme.success : Theme.border_btn;
-
-                                        HorizontalLayout {
-                                            padding-left: 14px; padding-right: 14px;
-                                            Text {
-                                                text: root.listener_active ? "ВКЛЮЧЕНЫ" : "ВЫКЛЮЧЕНЫ";
-                                                font-size: 12px;
-                                                font-weight: 800;
-                                                color: root.listener_active ? Theme.app_bg : Theme.text_secondary;
-                                                vertical-alignment: center;
+                                        height: 36px;
+                                        border-radius: Theme.radius_md;
+                                        background: root.listener_active ? Theme.success_subtle : Theme.surface;
+                                        Text { text: root.listener_active ? "Программные назначения включены" : "Программные назначения выключены"; color: root.listener_active ? Theme.success : Theme.text_secondary; font-size: Theme.font_caption; horizontal-alignment: center; vertical-alignment: center; }
+                                        TouchArea { mouse-cursor: pointer; clicked => { root.toggle_listener(); } }
+                                    }
+                                    IconButton {
+                                        icon: "Студия макросов →";
+                                        btn_width: 200px;
+                                        btn_height: 34px;
+                                        icon_size: 12px;
+                                        clicked => { root.active_tab = 3; }
+                                    }
+                                    ScrollView {
+                                        content-width: self.visible-width;
+                                        horizontal-scrollbar-policy: always-off;
+                                        VerticalLayout {
+                                            spacing: 8px;
+                                            for item in root.keybind_items : KeybindRow {
+                                                button_id: item.button_id;
+                                                button_label: item.button_label;
+                                                default_action: item.default_action;
+                                                assigned_macro: item.assigned_macro;
+                                                assigned_label: item.assigned_label;
+                                                is_mouse: item.is_mouse;
+                                                assign => { root.open_keybind_picker(item.button_id, item.button_label); }
+                                                clear => { root.clear_keybind(item.button_id); }
                                             }
                                         }
-                                        TouchArea {
-                                            clicked => { root.toggle_listener(); }
-                                        }
                                     }
                                 }
                             }
-
-                            // Visual G502 Layout Header
-                            Text {
-                                text: "Кнопки G502 HERO и горячие клавиши";
-                                font-size: 13px;
-                                font-weight: 700;
-                                color: Theme.text_white_dim;
-                            }
-
-                            // Scrollable Mappings
                             VerticalLayout {
-
-                                VerticalLayout {
-                                    spacing: 8px;
-
-                                    for item in root.keybind_items : KeybindRow {
-                                        button_id: item.button_id;
-                                        button_label: item.button_label;
-                                        default_action: item.default_action;
-                                        assigned_macro: item.assigned_macro;
-                                        assigned_label: item.assigned_label;
-                                        is_mouse: item.is_mouse;
-                                        assign => {
-                                            root.open_keybind_picker(item.button_id, item.button_label);
-                                        }
-                                        clear => { root.clear_keybind(item.button_id); }
-                                    }
+                                spacing: 10px;
+                                Text { text: "G502 HERO"; color: Theme.text_primary; font-size: Theme.font_display; font-weight: 800; }
+                                Text { text: "Выберите кнопку на мыши"; color: Theme.text_secondary; font-size: Theme.font_body; }
+                                MouseMap {
+                                    vertical-stretch: 1;
+                                    select(id) => { root.open_keybind_picker(id, id); }
                                 }
+                                Text { text: "G6–G9: для программных назначений выключите внутреннюю память в профилях."; color: Theme.text_subtle; font-size: Theme.font_caption; wrap: word-wrap; }
                             }
                         }
-                    }
+
+                        if root.active_tab == 6 : AppSettings {
+                            startup-state: root.autostart_state;
+                            startup-error: root.autostart_error;
+                            set-startup(enabled) => { root.set_autostart(enabled); }
+                        }
 
                         // ==========================================
                         // TAB 5: PROFILES MANAGEMENT
@@ -1297,13 +1306,6 @@ export struct QuickKeyItem {
                         vertical-alignment: center;
                     }
 
-                    Text {
-                        text: "Logitech HID++ 2.0 Native Worker • Win32 SendInput • 100% Offline";
-                        font-size: 11px;
-                        font-weight: 600;
-                        color: Theme.text_muted;
-                        vertical-alignment: center;
-                    }
                 }
             }
         } // Close root VerticalLayout (Header + Main Body + Footer)

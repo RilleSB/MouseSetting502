@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use hidapi::HidApi;
+use crate::hidpp::features::report_rate::read_report_rate;
 use crate::hidpp::{HidppDevice, features::{get_current_dpi, get_current_onboard_profile, set_current_onboard_profile}};
 use crate::hidpp::features::{profiles::{get_onboard_mode, set_onboard_mode}, buttons::{start_button_spy, button_bitmap}};
 use crate::lghub::{AppProfile, KeybindListener};
@@ -19,6 +20,17 @@ pub struct DeviceConnection {
 pub fn update_ui(weak: &slint::Weak<MainWindow>, f: impl FnOnce(MainWindow) + Send + 'static) {
     let weak = weak.clone();
     let _ = slint::invoke_from_event_loop(move || { if let Some(app) = weak.upgrade() { f(app); } });
+}
+
+pub fn refresh_report_rate(dev: &HidppDevice, weak: &slint::Weak<MainWindow>) {
+    let data = read_report_rate(dev);
+    update_ui(weak, move |app| {
+        let (intervals, current) = data.unwrap_or_default();
+        let intervals = intervals.into_iter().map(i32::from).collect::<Vec<_>>();
+        app.set_report_rate_intervals(slint::ModelRc::new(slint::VecModel::from(intervals)));
+        app.set_report_rate_interval(current as i32);
+        app.set_report_rate_busy(false);
+    });
 }
 
 impl DeviceConnection {
@@ -43,6 +55,7 @@ impl DeviceConnection {
         let status = if onboard { "Внутренняя память включена. Для назначения G6–G9 выключите её в профилях.".into() }
             else { connection.start_spy().unwrap_or_else(|error| error) };
         connection.publish(weak);
+        refresh_report_rate(&connection.dev, weak);
         update_ui(weak, move |app| app.set_status_msg(status.into()));
         Ok(connection)
     }
@@ -107,6 +120,7 @@ impl DeviceConnection {
                 if let Err(error) = result { update_ui(weak, move |app| app.set_status_msg(error.into())); }
             }
             self.publish(weak);
+            refresh_report_rate(&self.dev, weak);
         }
         if onboard {
             let slot = get_current_onboard_profile(&self.dev)?;

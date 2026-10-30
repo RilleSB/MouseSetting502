@@ -4,6 +4,7 @@ pub mod device_worker;
 mod device_connection;
 mod device_runtime;
 mod binding_persistence;
+mod autostart;
 pub mod macro_controller;
 pub mod keybind_controller;
 pub mod profile_controller;
@@ -22,7 +23,6 @@ use profile_controller::{setup_profile_controller, ProfileControllerContext};
 use crate::lghub::{
     LgHubSettings, custom_macros::load_custom_macros,
     keybinds::{KeybindListener, load_bindings},
-    dpi_presets::load_dpi_presets,
     profiles::{load_profiles, get_active_profile_id, get_active_profile, get_g9_lock},
     macro_engine,
 };
@@ -35,6 +35,35 @@ pub fn run() {
             return;
         }
     };
+
+    fn startup_number(state: autostart::StartupState) -> i32 {
+        match state {
+            autostart::StartupState::Disabled => 0,
+            autostart::StartupState::Current => 1,
+            autostart::StartupState::OtherCopy => 2,
+            autostart::StartupState::Occupied => 3,
+        }
+    }
+    match autostart::state() {
+        Ok(state) => app.set_autostart_state(startup_number(state)),
+        Err(error) => { app.set_autostart_state(-1); app.set_autostart_error(error.into()); }
+    }
+    let startup_weak = app.as_weak();
+    app.on_set_autostart(move |enabled| {
+        if let Some(app) = startup_weak.upgrade() {
+            match autostart::set(enabled) {
+                Ok(state) => {
+                    app.set_autostart_state(startup_number(state));
+                    app.set_autostart_error("".into());
+                    app.set_status_msg(if enabled { "Автозагрузка включена" } else { "Автозагрузка выключена" }.into());
+                }
+                Err(error) => {
+                    if let Ok(state) = autostart::state() { app.set_autostart_state(startup_number(state)); }
+                    app.set_autostart_error(format!("Не удалось изменить автозагрузку: {error}").into());
+                }
+            }
+        }
+    });
 
     // 1. Slint Models created ONCE, mutated in-place
     let macro_model = Rc::new(VecModel::<MacroItem>::default());
@@ -49,7 +78,9 @@ pub fn run() {
     let profile_model = Rc::new(VecModel::<ProfileItem>::default());
     app.set_profile_items(ModelRc::from(profile_model.clone()));
 
-    let initial_dpi_presets = load_dpi_presets();
+    let initial_profiles = load_profiles();
+    let active_prof = get_active_profile(&initial_profiles);
+    let initial_dpi_presets = active_prof.dpi_presets.clone();
     let dpi_presets_model = Rc::new(VecModel::<i32>::from(
         initial_dpi_presets.iter().map(|&x| x as i32).collect::<Vec<_>>()
     ));
@@ -61,9 +92,7 @@ pub fn run() {
     let custom_macros = Arc::new(Mutex::new(load_custom_macros()));
     let keybinds = Arc::new(Mutex::new(load_bindings()));
 
-    let initial_profiles = load_profiles();
     let active_id = get_active_profile_id();
-    let active_prof = get_active_profile(&initial_profiles);
     app.set_active_profile_name(active_prof.name.into());
     let profiles = Arc::new(Mutex::new(initial_profiles));
     let g9_locked = Arc::new(std::sync::atomic::AtomicBool::new(get_g9_lock()));

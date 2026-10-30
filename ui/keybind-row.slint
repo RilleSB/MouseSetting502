@@ -10,33 +10,26 @@ export component KeybindRow inherits Rectangle {
     callback assign();
     callback clear();
 
-    height: 52px;
     min-width: 0px;
+    vertical-stretch: 0;
     border-radius: Theme.radius_base;
     background: root.assigned_macro != "" ? Theme.success_subtle : Theme.card_bg_subtle;
     border-width: 1px;
     border-color: root.assigned_macro != "" ? Theme.success_border : Theme.border_subtle;
 
-    HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        spacing: 12px;
-
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
         HorizontalLayout {
-            spacing: 12px;
+            spacing: 10px;
             alignment: start;
-            horizontal-stretch: 1;
-            min-width: 0px;
-
-            // Button badge
             Rectangle {
-                width: 44px;
-                height: 30px;
+                width: 40px;
+                height: 28px;
                 border-radius: Theme.radius_md;
                 background: root.is_mouse ? Theme.accent_light : Theme.purple_subtle;
                 border-width: 1px;
                 border-color: root.is_mouse ? Theme.accent_border : Theme.purple_border;
-
                 Text {
                     text: root.button_id;
                     font-size: Theme.font_body_sm;
@@ -46,71 +39,67 @@ export component KeybindRow inherits Rectangle {
                     vertical-alignment: center;
                 }
             }
-
-            VerticalLayout {
-                alignment: center;
-                horizontal-stretch: 1;
+            Text {
                 min-width: 0px;
-                spacing: 2px;
-                Text {
-                    min-width: 0px;
-                    overflow: elide;
-                    text: root.button_label;
-                    font-size: Theme.font_body;
-                    font-weight: 700;
-                    color: Theme.text_primary;
-                }
-                Text {
-                    min-width: 0px;
-                    overflow: elide;
-                    text: root.assigned_macro == "__DPI_DOWN__" ? "🎯 ДЕЙСТВИЕ: DPI Вниз (Предыдущий пресет)" :
-                          root.assigned_macro == "__DPI_UP__" ? "🎯 ДЕЙСТВИЕ: DPI Вверх (Следующий пресет)" :
-                          root.assigned_macro != "" ? ("Назначено: " + root.assigned_label) : ("По умолчанию: " + root.default_action);
-                    font-size: Theme.font_caption;
-                    font-weight: 600;
-                    color: root.assigned_macro != "" ? Theme.success : Theme.text_subtle;
-                }
+                horizontal-stretch: 1;
+                text: root.button_label;
+                wrap: word-wrap;
+                font-size: Theme.font_body;
+                font-weight: 700;
+                color: Theme.text_primary;
+                vertical-alignment: center;
             }
         }
-
+        Text {
+            min-width: 0px;
+            text: root.assigned_macro == "__DPI_DOWN__" ? "Назначено: DPI вниз" :
+                  root.assigned_macro == "__DPI_UP__" ? "Назначено: DPI вверх" :
+                  root.assigned_macro != "" ? ("Назначено: " + root.assigned_label) : ("По умолчанию: " + root.default_action);
+            wrap: word-wrap;
+            font-size: Theme.font_body_sm;
+            color: root.assigned_macro != "" ? Theme.success : Theme.text_secondary;
+        }
         HorizontalLayout {
-            horizontal-stretch: 0;
             spacing: 8px;
-            alignment: center;
-
-            // Assign button
+            alignment: start;
             Rectangle {
-                height: 32px;
+                height: 30px;
                 border-radius: Theme.radius_md;
                 background: Theme.surface_btn;
                 border-width: 1px;
                 border-color: Theme.border_btn_hover;
-
                 HorizontalLayout {
-                    padding-left: 12px; padding-right: 12px;
-                    alignment: center;
+                    padding-left: 12px;
+                    padding-right: 12px;
                     Text {
-                        text: root.assigned_macro != "" ? "ИЗМЕНИТЬ" : "НАЗНАЧИТЬ";
-                        font-size: Theme.font_caption;
-                        font-weight: 800;
-                        color: root.assigned_macro != "" ? Theme.success : Theme.accent;
+                        text: root.assigned_macro != "" ? "Изменить" : "Назначить";
+                        font-size: Theme.font_body_sm;
+                        font-weight: 700;
+                        color: Theme.accent;
                         vertical-alignment: center;
                     }
                 }
-                TouchArea { clicked => { root.assign(); } }
+                TouchArea { mouse-cursor: pointer; clicked => { root.assign(); } }
             }
-
-            // Reset to default button
             if root.assigned_macro != "" : Rectangle {
-                width: 32px; height: 32px;
+                height: 30px;
                 border-radius: Theme.radius_md;
-                background: Theme.error_btn_bg;
+                background: Theme.error_subtle;
                 border-width: 1px;
                 border-color: Theme.error_border;
-                Text { text: "↺"; font-size: Theme.font_md; font-weight: 800; color: Theme.error_bright; horizontal-alignment: center; vertical-alignment: center; }
-                TouchArea { clicked => { root.clear(); } }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    Text {
+                        text: "Сбросить";
+                        font-size: Theme.font_body_sm;
+                        font-weight: 700;
+                        color: Theme.error_text;
+                        vertical-alignment: center;
+                    }
+                }
+                TouchArea { mouse-cursor: pointer; clicked => { root.clear(); } }
             }
         }
     }
 }
-

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use crate::hidpp::features::{set_dpi, set_led_effect, turn_off_all_leds, LedEffect, LedZone};
 use crate::lghub::{AppProfile, KeybindListener};
-use super::{bridge::MainWindow, device_connection::{DeviceConnection, update_ui}, device_worker::DeviceCommand};
+use super::{bridge::MainWindow, device_connection::{DeviceConnection, update_ui, refresh_report_rate}, device_worker::DeviceCommand};
 
 pub struct DeviceWorkerGuard(pub Arc<AtomicBool>);
 impl Drop for DeviceWorkerGuard {
@@ -32,6 +32,7 @@ pub fn start(weak: slint::Weak<MainWindow>, rx: Receiver<DeviceCommand>, profile
                     } else {
                         update_ui(&weak, |app| {
                             app.set_onboard_busy(false);
+                            app.set_report_rate_busy(false);
                             app.set_status_msg("Мышь недоступна. Подключите её и нажмите обновление устройств.".into());
                         });
                     }
@@ -69,6 +70,9 @@ fn disconnected(weak: &slint::Weak<MainWindow>, error: String) {
     update_ui(weak, move |app| {
         app.set_device_connected(false);
         app.set_onboard_known(false);
+        app.set_report_rate_busy(false);
+        app.set_report_rate_interval(0);
+        app.set_report_rate_intervals(Default::default());
         app.set_onboard_busy(false);
         app.set_hardware_buttons_ready(false);
         app.set_device_name("G502 HERO недоступна".into());
@@ -85,7 +89,21 @@ fn execute(device: &mut DeviceConnection, command: DeviceCommand, listener: &Key
             update_ui(weak, move |app| app.set_current_dpi(confirmed as i32));
             Ok(format!("Установлен DPI: {confirmed}"))
         }
-        DeviceCommand::SetMemoryMode(onboard) => device.set_memory(onboard, listener),
+        DeviceCommand::SetReportRate(interval) => {
+            let result = if device.onboard || !device.known {
+                Err("Выключите внутреннюю память перед изменением частоты".into())
+            } else {
+                crate::hidpp::features::report_rate::set_report_rate(&device.dev, interval)
+                    .map(|(_, confirmed)| format!("Частота опроса: {} Гц", 1000 / u32::from(confirmed)))
+            };
+            refresh_report_rate(&device.dev, weak);
+            result
+        }
+        DeviceCommand::SetMemoryMode(onboard) => {
+            let result = device.set_memory(onboard, listener);
+            refresh_report_rate(&device.dev, weak);
+            result
+        },
         DeviceCommand::SetRgbStatic(r, g, b) => {
             set_led_effect(&device.dev, LedZone::Logo, LedEffect::Static { r, g, b }, false)?;
             Ok(format!("Цвет установлен: RGB({r}, {g}, {b})"))

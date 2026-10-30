@@ -7,7 +7,6 @@ use super::models::{update_ui_profile_list, update_ui_keybind_list};
 use crate::lghub::{
     AppProfile, save_profiles, set_active_profile_id, get_active_profile_id,
     delete_profile_by_id, ButtonBinding, KeybindListener, save_bindings,
-    save_dpi_presets,
 };
 
 pub struct ProfileControllerContext<'a> {
@@ -69,7 +68,6 @@ pub fn setup_profile_controller(ctx: &ProfileControllerContext) {
             // 1. Update DPI presets
             if let Ok(mut presets) = dpi_arc.lock() {
                 *presets = p.dpi_presets.clone();
-                let _ = save_dpi_presets(&presets);
             }
             dpi_model_ref.set_vec(p.dpi_presets.iter().map(|&x| x as i32).collect::<Vec<_>>());
 

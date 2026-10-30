@@ -48,7 +48,7 @@ fn open_g502(api: &HidApi) -> Result<HidppDevice, String> {
 
 fn print_banner() {
     println!("============================================================");
-    println!("   🦀 GHUB-Rust: Ultra-fast Logitech Controller (Native)   ");
+    println!("   🖱 Mouse Settings 502   ");
     println!("============================================================");
 }
 
@@ -78,7 +78,7 @@ fn main() {
     }
 
     // 2. Default: Launch GUI!
-    if args.len() == 1 || (args.len() > 1 && args[1] == "--gui") {
+    if args.len() == 1 || (args.len() > 1 && (args[1] == "--gui" || args[1] == "--autostart")) {
         ui::run();
         return;
     }

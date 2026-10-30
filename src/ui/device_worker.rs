@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use slint::{ComponentHandle, VecModel};
 
 use super::bridge::MainWindow;
-use crate::lghub::{add_dpi_preset, remove_dpi_preset, get_next_preset, get_prev_preset, AppProfile, KeybindListener, set_g9_lock};
+use crate::lghub::{get_next_preset, get_prev_preset, AppProfile, KeybindListener, set_g9_lock, get_active_profile_id, save_profiles};
 
 pub const LOGITECH_VID: u16 = 0x046D;
 pub const G502_PID: u16 = 0xC08B;
@@ -14,6 +14,7 @@ pub const G435_PID: u16 = 0x0ACB;
 #[allow(clippy::enum_variant_names)]
 pub enum DeviceCommand {
     SetDpi(u16),
+    SetReportRate(u8),
     SetRgbStatic(u8, u8, u8),
     SetRgbCycle,
     SetRgbBreathe(u8, u8, u8),
@@ -44,6 +45,20 @@ pub fn init_device_worker(
             if tx.send(DeviceCommand::SetMemoryMode(onboard)).is_err() {
                 app.set_onboard_busy(false);
                 app.set_status_msg("Обработчик устройства остановлен".into());
+            }
+        }
+    });
+
+    let tx = cmd_tx.clone();
+    let weak = app.as_weak();
+    app.on_set_report_rate(move |interval| {
+        if let Some(app) = weak.upgrade() {
+            if !app.get_device_connected() || !app.get_onboard_known() || app.get_onboard_enabled()
+                || app.get_report_rate_busy() || !(1..=8).contains(&interval) { return; }
+            app.set_report_rate_busy(true);
+            if tx.send(DeviceCommand::SetReportRate(interval as u8)).is_err() {
+                app.set_report_rate_busy(false);
+                app.set_status_msg("Не удалось связаться с мышью".into());
             }
         }
     });
@@ -82,37 +97,38 @@ pub fn init_device_worker(
         }
     });
 
-    let app_weak = app.as_weak();
-    let tx = cmd_tx.clone();
-    let presets_arc = dpi_presets.clone();
-    let model = dpi_presets_model.clone();
-    app.on_add_dpi_preset(move |target| {
-        let dpi_val = ((target + 25) / 50 * 50).clamp(100, 25600) as u16;
-        let mut p = presets_arc.lock().unwrap_or_else(|e| e.into_inner());
-        if let Ok(()) = add_dpi_preset(&mut p, dpi_val) {
-            let new_list: Vec<i32> = p.iter().map(|&x| x as i32).collect();
-            model.set_vec(new_list);
-            let _ = tx.send(DeviceCommand::SetDpi(dpi_val));
-            if let Some(app) = app_weak.upgrade() {
-                app.set_custom_dpi_input("".into());
-                app.set_status_msg(format!("Добавлен пресет DPI: {}", dpi_val).into());
+    for add in [true, false] {
+        let app_weak = app.as_weak();
+        let presets_arc = dpi_presets.clone();
+        let profiles_arc = profiles.clone();
+        let model = dpi_presets_model.clone();
+        let update = move |target: i32| {
+            let Some(app) = app_weak.upgrade() else { return; };
+            let dpi = ((target.clamp(100, 25600) + 25) / 50 * 50) as u16;
+            let mut presets = presets_arc.lock().unwrap_or_else(|e| e.into_inner());
+            let mut next = presets.clone();
+            if add { if !next.contains(&dpi) { next.push(dpi); next.sort_unstable(); } }
+            else if next.len() > 1 { next.retain(|value| *value != dpi); }
+            if next.is_empty() { app.set_status_msg("Добавьте хотя бы один уровень DPI".into()); return; }
+            let mut profiles = profiles_arc.lock().unwrap_or_else(|e| e.into_inner());
+            let mut updated = profiles.clone();
+            let active_id = get_active_profile_id();
+            let Some(profile) = updated.iter_mut().find(|p| p.id == active_id) else {
+                app.set_status_msg("Активный профиль не найден".into()); return;
+            };
+            profile.dpi_presets = next.clone();
+            if !next.contains(&profile.current_dpi) { profile.current_dpi = next[0]; }
+            if let Err(error) = save_profiles(&updated) {
+                app.set_status_msg(format!("Не удалось сохранить DPI профиля: {error}").into()); return;
             }
-        }
-    });
-
-    let app_weak = app.as_weak();
-    let presets_arc = dpi_presets.clone();
-    let model = dpi_presets_model.clone();
-    app.on_remove_dpi_preset(move |target| {
-        let mut p = presets_arc.lock().unwrap_or_else(|e| e.into_inner());
-        if let Ok(()) = remove_dpi_preset(&mut p, target as u16) {
-            let new_list: Vec<i32> = p.iter().map(|&x| x as i32).collect();
-            model.set_vec(new_list);
-            if let Some(app) = app_weak.upgrade() {
-                app.set_status_msg(format!("Удален пресет DPI: {}", target).into());
-            }
-        }
-    });
+            *profiles = updated;
+            *presets = next.clone();
+            model.set_vec(next.iter().map(|&value| value as i32).collect::<Vec<_>>());
+            if add { app.set_custom_dpi_input("".into()); }
+            app.set_status_msg("Список DPI активного профиля сохранён".into());
+        };
+        if add { app.on_add_dpi_preset(update); } else { app.on_remove_dpi_preset(update); }
+    }
 
     let app_weak = app.as_weak();
     let tx = cmd_tx.clone();
