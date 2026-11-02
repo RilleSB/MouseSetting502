@@ -145,6 +145,7 @@ export struct QuickKeyItem {
         in-out property <bool> builder_is_toggle: true;
         in-out property <[string]> builder_steps: [];
         in-out property <string> builder_custom_delay: "50";
+        in-out property <string> builder_error: "";
 
         // Keybind picker modal
         in-out property <bool> show_bind_picker: false;
@@ -153,6 +154,7 @@ export struct QuickKeyItem {
 
         // Profile state
         in-out property <string> active_profile_name: "Основной (Desktop)";
+        in-out property <string> active_profile_id: "";
         in-out property <[ProfileItem]> profile_items: [];
         in-out property <bool> show_profile_creator: false;
         in-out property <string> new_profile_name: "";
@@ -177,6 +179,8 @@ export struct QuickKeyItem {
         callback delete_profile(string);
 
         callback set_dpi(int);
+        callback apply_profile_dpi(string, string, int);
+        callback refresh_profile_models();
         callback dpi_up();
         callback dpi_down();
         callback add_dpi_preset(int);
@@ -764,6 +768,12 @@ export struct QuickKeyItem {
                                         border-width: 1px;
                                         border-color: root.current_dpi == dpi ? Theme.accent : Theme.border_btn;
 
+                                        // Keep selection behind the separate remove button.
+                                        TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.set_dpi(dpi); }
+                                        }
+
                                         HorizontalLayout {
                                             padding-left: 14px;
                                             padding-right: 10px;
@@ -780,26 +790,26 @@ export struct QuickKeyItem {
 
                                             // Remove preset button (if more than 1)
                                             if root.dpi_presets.length > 1 : Rectangle {
-                                                width: 18px;
-                                                height: 18px;
-                                                border-radius: Theme.radius_xs;
-                                                background: root.current_dpi == dpi ? Theme.app_bg : Theme.surface_elevated;
+                                                width: 24px;
+                                                height: 24px;
+                                                border-radius: Theme.radius_sm;
+                                                background: remove-touch.has-hover ? Theme.error_btn_bg : (root.current_dpi == dpi ? Theme.app_bg : Theme.surface_elevated);
+                                                accessible-role: button;
+                                                accessible-label: "Удалить " + dpi + " DPI из пресетов";
 
                                                 Text {
-                                                    text: "✕";
-                                                    font-size: 10px;
-                                                    font-weight: 800;
-                                                    color: root.current_dpi == dpi ? Theme.accent : Theme.text_subtle;
+                                                    text: "×";
+                                                    font-size: 20px;
+                                                    font-weight: 700;
+                                                    color: remove-touch.has-hover ? Theme.error_text : (root.current_dpi == dpi ? Theme.accent : Theme.text_white_soft);
                                                     horizontal-alignment: center;
                                                     vertical-alignment: center;
                                                 }
-                                                TouchArea {
+                                                remove-touch := TouchArea {
+                                                    mouse-cursor: pointer;
                                                     clicked => { root.remove_dpi_preset(dpi); }
                                                 }
                                             }
-                                        }
-                                        TouchArea {
-                                            clicked => { root.set_dpi(dpi); }
                                         }
                                     }
                                 }
@@ -913,21 +923,18 @@ export struct QuickKeyItem {
                                         color: Theme.text_secondary;
                                     }
                                     Text {
-                                        text: root.current_dpi + " DPI";
+                                        text: Math.round(dpi-slider.value / 50) * 50 + " DPI";
                                         font-size: Theme.font_caption;
                                         font-weight: 700;
                                         color: Theme.accent;
                                     }
                                 }
-                                Slider {
+                                dpi-slider := Slider {
                                     minimum: 100;
                                     maximum: 25600;
                                     value: root.current_dpi;
-                                    changed(v) => {
-                                        root.current_dpi = Math.round(v / 50) * 50;
-                                    }
                                     released(v) => {
-                                        root.set_dpi(root.current_dpi);
+                                        root.set_dpi(Math.round(v / 50) * 50);
                                     }
                                 }
                             }
@@ -1512,7 +1519,7 @@ export struct QuickKeyItem {
                         Text { text: "Цепочка действий макроса (" + root.builder_steps.length + " шагов):"; font-size: 11px; font-weight: 700; color: Theme.text_white_dim; }
 
                         ScrollView {
-                            height: 160px;
+                            height: root.builder_error == "" ? 160px : 100px;
                             VerticalLayout {
                                 spacing: 4px;
                                 for step[idx] in root.builder_steps : StepRow {
@@ -1523,6 +1530,16 @@ export struct QuickKeyItem {
                                     remove => { root.builder_remove_step(idx); }
                                 }
                             }
+                        }
+                    }
+
+                    if root.builder_error != "" : ScrollView {
+                        height: 48px;
+                        Text {
+                            text: root.builder_error;
+                            color: Theme.error_text;
+                            font-size: 11px;
+                            wrap: word-wrap;
                         }
                     }
 

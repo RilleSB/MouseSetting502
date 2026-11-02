@@ -4,17 +4,16 @@ pub mod hidpp;
 pub mod lghub;
 pub mod ui;
 
-use std::env;
-use std::thread;
-use std::time::Duration;
 use hidapi::HidApi;
 use hidpp::HidppDevice;
 use hidpp::features::{
-    get_device_name, get_current_dpi, set_dpi, get_dpi_range,
-    set_led_effect, turn_off_all_leds,
-    LedZone, LedEffect,
+    LedEffect, LedZone, get_current_dpi, get_device_name, get_dpi_range, set_dpi, set_led_effect,
+    turn_off_all_leds,
 };
 use lghub::{LgHubSettings, macro_engine};
+use std::env;
+use std::thread;
+use std::time::Duration;
 
 const LOGITECH_VID: u16 = 0x046D;
 const G502_PID: u16 = 0xC08B;
@@ -42,7 +41,9 @@ fn open_g502(api: &HidApi) -> Result<HidppDevice, String> {
         })
         .ok_or("G502 HERO not found on HID++ interface")?;
 
-    let dev = api.open_path(info.path()).map_err(|e| format!("Failed to open G502: {e}"))?;
+    let dev = api
+        .open_path(info.path())
+        .map_err(|e| format!("Failed to open G502: {e}"))?;
     let hidpp = HidppDevice::new(dev, 0xFF);
     // Inspecting or opening the device must preserve its memory mode.
     Ok(hidpp)
@@ -67,6 +68,7 @@ fn print_help() {
     println!("  ghub_rust --macros              List all macros (G HUB & Custom) and keybinds");
     println!("  ghub_rust --run-macro <name>    Test play a macro (e.g. --run-macro lkm)");
     println!("  ghub_rust --help                Show this help message");
+    println!("  ghub_rust --check-updates       Check GitHub version and executable SHA-256");
 }
 
 #[cfg(windows)]
@@ -84,7 +86,8 @@ fn attach_console() {}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let is_gui = args.len() == 1 || (args.len() > 1 && (args[1] == "--gui" || args[1] == "--autostart"));
+    let is_gui =
+        args.len() == 1 || (args.len() > 1 && (args[1] == "--gui" || args[1] == "--autostart"));
     if !is_gui {
         attach_console();
     }
@@ -93,6 +96,30 @@ fn main() {
     if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
         print_banner();
         print_help();
+        return;
+    }
+
+    if args.get(1).is_some_and(|arg| arg == "--check-updates") {
+        match ui::updater::check_for_updates() {
+            Ok(info) => println!(
+                "{}",
+                serde_json::json!({
+                    "current_version": ui::updater::APP_VERSION,
+                    "build_git_hash": ui::updater::BUILD_GIT_HASH,
+                    "latest_version": info.tag_name,
+                    "release_url": info.release_url,
+                    "asset_name": info.asset_name,
+                    "asset_sha256": info.asset_sha256,
+                    "local_sha256": info.local_sha256,
+                    "update_available": info.is_newer,
+                    "hash_matches": info.hash_matches,
+                })
+            ),
+            Err(err) => {
+                eprintln!("Update check failed: {err}");
+                std::process::exit(1);
+            }
+        }
         return;
     }
 
@@ -109,22 +136,44 @@ fn main() {
         println!("\n[+] Custom User Macros (user_macros.json):");
         let custom = lghub::load_custom_macros();
         for (i, m) in custom.iter().enumerate() {
-            let toggle_str = if m.is_toggle { " (Toggle / Auto-clicker)" } else { " (Sequence)" };
-            println!("  #{} '{}' -> Type: {}{}, Steps: {}", i + 1, m.name, m.macro_type, toggle_str, m.sequence.len());
+            let toggle_str = if m.is_toggle {
+                " (Toggle / Auto-clicker)"
+            } else {
+                " (Sequence)"
+            };
+            println!(
+                "  #{} '{}' -> Type: {}{}, Steps: {}",
+                i + 1,
+                m.name,
+                m.macro_type,
+                toggle_str,
+                m.sequence.len()
+            );
         }
 
         println!("\n[+] Reading original G HUB settings database...");
         match LgHubSettings::load_from_db() {
             Ok(settings) => {
-                println!("Loaded {} cards and {} profiles from G HUB.", settings.cards.len(), settings.profiles.len());
+                println!(
+                    "Loaded {} cards and {} profiles from G HUB.",
+                    settings.cards.len(),
+                    settings.profiles.len()
+                );
 
                 println!("\n--- G HUB Recorded Macros ---");
                 let mut macro_count = 0;
                 for card in &settings.cards {
                     if let Some(m) = &card.macro_data {
                         macro_count += 1;
-                        let toggle_str = if m.is_toggle { " (Toggle / Auto-clicker)" } else { "" };
-                        println!("  #{} '{}' -> Type: {}{}", macro_count, m.name, m.macro_type, toggle_str);
+                        let toggle_str = if m.is_toggle {
+                            " (Toggle / Auto-clicker)"
+                        } else {
+                            ""
+                        };
+                        println!(
+                            "  #{} '{}' -> Type: {}{}",
+                            macro_count, m.name, m.macro_type, toggle_str
+                        );
                         if let Some(action) = &m.action_name {
                             println!("       Action: {}", action);
                         }
@@ -159,7 +208,10 @@ fn main() {
 
         // Check custom macros first
         let custom = lghub::load_custom_macros();
-        let target_custom = custom.iter().find(|m| m.name.contains(macro_name) || m.name == *macro_name).cloned();
+        let target_custom = custom
+            .iter()
+            .find(|m| m.name.contains(macro_name) || m.name == *macro_name)
+            .cloned();
 
         let target = if let Some(m) = target_custom {
             Some(m)
@@ -168,7 +220,11 @@ fn main() {
             match LgHubSettings::load_from_db() {
                 Ok(settings) => settings.cards.iter().find_map(|c| {
                     if c.name.as_deref().unwrap_or("").contains(macro_name)
-                        || c.macro_data.as_ref().map(|m| m.name.as_str()).unwrap_or("").contains(macro_name)
+                        || c.macro_data
+                            .as_ref()
+                            .map(|m| m.name.as_str())
+                            .unwrap_or("")
+                            .contains(macro_name)
                     {
                         c.macro_data.clone()
                     } else {
@@ -180,7 +236,10 @@ fn main() {
         };
 
         if let Some(m) = target {
-            println!("[+] Found macro '{}' (Toggle: {})! Running for 3 seconds...", m.name, m.is_toggle);
+            println!(
+                "[+] Found macro '{}' (Toggle: {})! Running for 3 seconds...",
+                m.name, m.is_toggle
+            );
             if m.is_toggle {
                 let active = macro_engine::start_macro_loop(m.clone());
                 thread::sleep(Duration::from_secs(3));
@@ -191,7 +250,10 @@ fn main() {
                 println!("[+] Executed macro sequence once.");
             }
         } else {
-            eprintln!("[-] Macro '{}' not found in custom macros or G HUB database.", macro_name);
+            eprintln!(
+                "[-] Macro '{}' not found in custom macros or G HUB database.",
+                macro_name
+            );
         }
         return;
     }
@@ -212,10 +274,18 @@ fn main() {
         for dev in api.device_list() {
             if dev.vendor_id() == LOGITECH_VID {
                 if dev.product_id() == G502_PID && !g502_found {
-                    println!("  * Mouse: Logitech G502 HERO (VID: 0x{:04X}, PID: 0x{:04X})", dev.vendor_id(), dev.product_id());
+                    println!(
+                        "  * Mouse: Logitech G502 HERO (VID: 0x{:04X}, PID: 0x{:04X})",
+                        dev.vendor_id(),
+                        dev.product_id()
+                    );
                     g502_found = true;
                 } else if dev.product_id() == G435_PID && !g435_found {
-                    println!("  * Headset: Logitech G435 Lightspeed (VID: 0x{:04X}, PID: 0x{:04X})", dev.vendor_id(), dev.product_id());
+                    println!(
+                        "  * Headset: Logitech G435 Lightspeed (VID: 0x{:04X}, PID: 0x{:04X})",
+                        dev.vendor_id(),
+                        dev.product_id()
+                    );
                     g435_found = true;
                 }
             }
@@ -241,7 +311,10 @@ fn main() {
             Err(e) => eprintln!("DPI read error    : {e}"),
         }
         match get_dpi_range(&g502, 0) {
-            Ok(r) => println!("Supported DPI     : {} - {} (step: {})", r.min_dpi, r.max_dpi, r.step),
+            Ok(r) => println!(
+                "Supported DPI     : {} - {} (step: {})",
+                r.min_dpi, r.max_dpi, r.step
+            ),
             Err(e) => eprintln!("Range query error : {e}"),
         }
         print_help();
@@ -281,7 +354,10 @@ fn main() {
                     return;
                 }
             };
-            println!("\n[*] Setting RGB Logo color to #{:02X}{:02X}{:02X} (R: {}, G: {}, B: {})...", r, g, b, r, g, b);
+            println!(
+                "\n[*] Setting RGB Logo color to #{:02X}{:02X}{:02X} (R: {}, G: {}, B: {})...",
+                r, g, b, r, g, b
+            );
             match set_led_effect(&g502, LedZone::Logo, LedEffect::Static { r, g, b }, false) {
                 Ok(_) => println!("[+] Color applied successfully!"),
                 Err(e) => eprintln!("[-] Failed to set color: {e}"),
@@ -289,7 +365,15 @@ fn main() {
         }
         "--cycle" => {
             println!("\n[*] Enabling rainbow color cycle on logo...");
-            match set_led_effect(&g502, LedZone::Logo, LedEffect::ColorCycle { period_ms: 10000, brightness: 255 }, false) {
+            match set_led_effect(
+                &g502,
+                LedZone::Logo,
+                LedEffect::ColorCycle {
+                    period_ms: 10000,
+                    brightness: 255,
+                },
+                false,
+            ) {
                 Ok(_) => println!("[+] Spectrum cycle active!"),
                 Err(e) => eprintln!("[-] Failed to enable cycle: {e}"),
             }
@@ -307,7 +391,17 @@ fn main() {
                 }
             };
             println!("\n[*] Enabling breathing effect (#{})...", args[2]);
-            match set_led_effect(&g502, LedZone::Logo, LedEffect::Breathing { r, g, b, period_ms: 3000 }, false) {
+            match set_led_effect(
+                &g502,
+                LedZone::Logo,
+                LedEffect::Breathing {
+                    r,
+                    g,
+                    b,
+                    period_ms: 3000,
+                },
+                false,
+            ) {
                 Ok(_) => println!("[+] Breathing effect active!"),
                 Err(e) => eprintln!("[-] Failed to set effect: {e}"),
             }

@@ -1,9 +1,9 @@
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-use hidapi::HidDevice;
 use super::packet::HidppPacket;
+use hidapi::HidDevice;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::{Duration, Instant};
 
 pub struct HidppDevice {
     device: Mutex<HidDevice>,
@@ -30,17 +30,24 @@ impl HidppDevice {
     }
 
     /// Sends a request and waits for the specific matching response (discarding notifications / alien packets).
-    pub fn send_request(&self, packet: &HidppPacket, timeout: Duration) -> Result<HidppPacket, String> {
+    pub fn send_request(
+        &self,
+        packet: &HidppPacket,
+        timeout: Duration,
+    ) -> Result<HidppPacket, String> {
         let dev = self.device.lock().unwrap_or_else(|e| e.into_inner());
         let bytes = packet.to_bytes();
 
-        dev.write(&bytes).map_err(|e| format!("HID write error: {e}"))?;
+        dev.write(&bytes)
+            .map_err(|e| format!("HID write error: {e}"))?;
 
         let deadline = Instant::now() + timeout;
         let mut buf = [0u8; 64];
 
         while Instant::now() < deadline {
-            let remaining_ms = deadline.saturating_duration_since(Instant::now()).as_millis() as i32;
+            let remaining_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis() as i32;
             let read_timeout = remaining_ms.clamp(10, 200);
 
             let n = match dev.read_timeout(&mut buf, read_timeout) {
@@ -58,8 +65,14 @@ impl HidppDevice {
             if incoming.is_response_to(packet) {
                 incoming.check_error()?;
                 return Ok(incoming);
-            } else if incoming.device_idx == self.device_idx && incoming.software_id == 0 && incoming.feature_idx != 0xff {
-                self.notifications.lock().unwrap_or_else(|e| e.into_inner()).push_back(incoming);
+            } else if incoming.device_idx == self.device_idx
+                && incoming.software_id == 0
+                && incoming.feature_idx != 0xff
+            {
+                self.notifications
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push_back(incoming);
             }
         }
 
@@ -69,7 +82,12 @@ impl HidppDevice {
         ))
     }
 
-    pub fn call_function(&self, feature_idx: u8, function_id: u8, params: &[u8]) -> Result<HidppPacket, String> {
+    pub fn call_function(
+        &self,
+        feature_idx: u8,
+        function_id: u8,
+        params: &[u8],
+    ) -> Result<HidppPacket, String> {
         let sw_id = self.next_sw_id();
         let req = HidppPacket::new_long(self.device_idx, feature_idx, function_id, sw_id, params)?;
         self.send_request(&req, Duration::from_millis(800))
@@ -78,15 +96,26 @@ impl HidppDevice {
     /// Requests and event reads use the same lock, preserving notification order.
     pub fn read_notification(&self, timeout_ms: i32) -> Result<Option<HidppPacket>, String> {
         let dev = self.device.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(packet) = self.notifications.lock().unwrap_or_else(|e| e.into_inner()).pop_front() {
+        if let Some(packet) = self
+            .notifications
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop_front()
+        {
             return Ok(Some(packet));
         }
         let mut buf = [0u8; 64];
-        let n = dev.read_timeout(&mut buf, timeout_ms.clamp(0, 50))
+        let n = dev
+            .read_timeout(&mut buf, timeout_ms.clamp(0, 50))
             .map_err(|e| format!("HID read error: {e}"))?;
-        if n == 0 { return Ok(None); }
-        Ok(HidppPacket::from_bytes(&buf[..n]).ok().filter(|packet|
-            packet.device_idx == self.device_idx && packet.software_id == 0 && packet.feature_idx != 0xff))
+        if n == 0 {
+            return Ok(None);
+        }
+        Ok(HidppPacket::from_bytes(&buf[..n]).ok().filter(|packet| {
+            packet.device_idx == self.device_idx
+                && packet.software_id == 0
+                && packet.feature_idx != 0xff
+        }))
     }
 
     pub fn get_feature_index(&self, feature_id: u16) -> Result<u8, String> {
@@ -102,9 +131,16 @@ impl HidppDevice {
         let params = [(feature_id >> 8) as u8, (feature_id & 0xFF) as u8];
         let resp = self.call_function(0x00, 0x00, &params)?;
 
-        let idx = resp.params.first().copied().ok_or("Malformed Root feature response: empty params")?;
+        let idx = resp
+            .params
+            .first()
+            .copied()
+            .ok_or("Malformed Root feature response: empty params")?;
         if idx == 0 {
-            return Err(format!("Feature 0x{:04X} not supported by device", feature_id));
+            return Err(format!(
+                "Feature 0x{:04X} not supported by device",
+                feature_id
+            ));
         }
 
         // 3. Store in cache

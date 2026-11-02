@@ -19,14 +19,16 @@ pub struct TrayIntegration {
 #[cfg(windows)]
 impl TrayIntegration {
     pub fn new(app: &MainWindow) -> Result<Self, String> {
-        use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
         use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+        use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
         let menu = Menu::new();
         let show_item = MenuItem::with_id("show-window", "Открыть Mouse Settings 502", true, None);
         let quit_item = MenuItem::with_id("quit-app", "Выход", true, None);
-        menu.append(&show_item).map_err(|e| format!("не удалось создать меню трея: {e}"))?;
-        menu.append(&quit_item).map_err(|e| format!("не удалось создать меню трея: {e}"))?;
+        menu.append(&show_item)
+            .map_err(|e| format!("не удалось создать меню трея: {e}"))?;
+        menu.append(&quit_item)
+            .map_err(|e| format!("не удалось создать меню трея: {e}"))?;
 
         // ID 1 is the icon resource embedded from icon.ico by build.rs.
         let icon = Icon::from_resource(1, None)
@@ -42,31 +44,44 @@ impl TrayIntegration {
         let show_id = show_item.id().clone();
         let quit_id = quit_item.id().clone();
         let event_timer = Timer::default();
-        event_timer.start(TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
-            let mut show_window = false;
-            let mut quit = false;
+        event_timer.start(
+            TimerMode::Repeated,
+            std::time::Duration::from_millis(100),
+            move || {
+                let mut show_window = false;
+                let mut quit = false;
 
-            while let Ok(event) = MenuEvent::receiver().try_recv() {
-                if event.id == show_id { show_window = true; }
-                if event.id == quit_id { quit = true; }
-            }
-            while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-                if matches!(event,
-                    TrayIconEvent::DoubleClick { button: MouseButton::Left, .. }
-                    | TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }
-                ) {
-                    show_window = true;
+                while let Ok(event) = MenuEvent::receiver().try_recv() {
+                    if event.id == show_id {
+                        show_window = true;
+                    }
+                    if event.id == quit_id {
+                        quit = true;
+                    }
                 }
-            }
+                while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+                    if matches!(
+                        event,
+                        TrayIconEvent::DoubleClick {
+                            button: MouseButton::Left,
+                            ..
+                        } | TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        }
+                    ) {
+                        show_window = true;
+                    }
+                }
 
-            if quit {
-                slint::quit_event_loop().ok();
-            } else if show_window {
-                if let Some(app) = weak.upgrade() {
+                if quit {
+                    slint::quit_event_loop().ok();
+                } else if show_window && let Some(app) = weak.upgrade() {
                     let _ = app.show();
                 }
-            }
-        });
+            },
+        );
 
         Ok(Self {
             _icon: tray_icon,
@@ -83,5 +98,7 @@ pub struct TrayIntegration;
 
 #[cfg(not(windows))]
 impl TrayIntegration {
-    pub fn new(_: &super::bridge::MainWindow) -> Result<Self, String> { Ok(Self) }
+    pub fn new(_: &super::bridge::MainWindow) -> Result<Self, String> {
+        Err("Системный трей поддерживается только в Windows".into())
+    }
 }

@@ -1,32 +1,36 @@
+mod autostart;
+mod binding_persistence;
 pub mod bridge;
-pub mod models;
-pub mod device_worker;
 mod device_connection;
 mod device_runtime;
-mod binding_persistence;
-mod autostart;
+pub mod device_worker;
+mod dpi_controller;
+pub mod keybind_controller;
+mod lifecycle;
+pub mod macro_controller;
+mod macro_persistence;
+pub mod models;
+pub mod profile_controller;
 mod tray;
 pub mod updater;
-pub mod macro_controller;
-pub mod keybind_controller;
-pub mod profile_controller;
 
+use slint::{ComponentHandle, ModelRc, VecModel};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use slint::{ComponentHandle, ModelRc, VecModel};
 
-use bridge::{MainWindow, MacroItem, KeybindItem, ProfileItem};
-use models::{update_ui_macro_list, update_ui_keybind_list, update_ui_profile_list};
+use bridge::{KeybindItem, MacroItem, MainWindow, ProfileItem};
 use device_worker::init_device_worker;
-use macro_controller::{setup_macro_controller, setup_macro_triggers, MacroControllerContext};
 use keybind_controller::setup_keybind_controller;
-use profile_controller::{setup_profile_controller, ProfileControllerContext};
+use macro_controller::{MacroControllerContext, setup_macro_controller, setup_macro_triggers};
+use models::{update_ui_keybind_list, update_ui_macro_list, update_ui_profile_list};
+use profile_controller::{ProfileControllerContext, setup_profile_controller};
 
 use crate::lghub::{
-    LgHubSettings, custom_macros::load_custom_macros,
-    keybinds::{KeybindListener, load_bindings},
-    profiles::{load_profiles, get_active_profile_id, get_active_profile, get_g9_lock},
+    LgHubSettings,
+    custom_macros::load_custom_macros,
+    keybinds::KeybindListener,
     macro_engine,
+    profiles::{get_active_profile, get_g9_lock, load_profiles},
 };
 
 pub fn run() {
@@ -38,17 +42,15 @@ pub fn run() {
         }
     };
 
-    // The window's close button should keep the application alive in the
-    // notification area. The explicit "Выход" action in the tray menu ends it.
-    app.window().on_close_requested(|| slint::CloseRequestResponse::HideWindow);
     let tray = match tray::TrayIntegration::new(&app) {
         Ok(tray) => Some(tray),
         Err(error) => {
             eprintln!("[!] Не удалось включить системный трей: {error}");
-            app.set_status_msg("Системный трей недоступен — закрытие завершит окно".into());
+            app.set_status_msg("Системный трей недоступен — закрытие завершит приложение".into());
             None
         }
     };
+    lifecycle::install_close_handler(app.window(), tray.is_some());
 
     fn startup_number(state: autostart::StartupState) -> i32 {
         match state {
@@ -60,7 +62,10 @@ pub fn run() {
     }
     match autostart::state() {
         Ok(state) => app.set_autostart_state(startup_number(state)),
-        Err(error) => { app.set_autostart_state(-1); app.set_autostart_error(error.into()); }
+        Err(error) => {
+            app.set_autostart_state(-1);
+            app.set_autostart_error(error.into());
+        }
     }
     let startup_weak = app.as_weak();
     app.on_set_autostart(move |enabled| {
@@ -69,11 +74,22 @@ pub fn run() {
                 Ok(state) => {
                     app.set_autostart_state(startup_number(state));
                     app.set_autostart_error("".into());
-                    app.set_status_msg(if enabled { "Автозагрузка включена" } else { "Автозагрузка выключена" }.into());
+                    app.set_status_msg(
+                        if enabled {
+                            "Автозагрузка включена"
+                        } else {
+                            "Автозагрузка выключена"
+                        }
+                        .into(),
+                    );
                 }
                 Err(error) => {
-                    if let Ok(state) = autostart::state() { app.set_autostart_state(startup_number(state)); }
-                    app.set_autostart_error(format!("Не удалось изменить автозагрузку: {error}").into());
+                    if let Ok(state) = autostart::state() {
+                        app.set_autostart_state(startup_number(state));
+                    }
+                    app.set_autostart_error(
+                        format!("Не удалось изменить автозагрузку: {error}").into(),
+                    );
                 }
             }
         }
@@ -121,12 +137,15 @@ pub fn run() {
                                     "У вас установлена последняя официальная сборка. Хэш исполняемого файла полностью совпадает с релизом GitHub!".into()
                                 );
                             } else {
-                                app.set_update_status_kind(2);
-                                let remote_sub = info.asset_sha256.as_deref().unwrap_or("не указан");
+                                app.set_update_status_kind(if info.asset_sha256.is_some() { 4 } else { 2 });
+                                let hash_status = if info.asset_sha256.is_some() {
+                                    "Хэш локального файла отличается от релизной сборки GitHub."
+                                } else {
+                                    "GitHub не предоставил SHA-256: целостность сборки не проверена."
+                                };
                                 app.set_update_status_msg(format!(
-                                    "Версия {} актуальна. Хэш локального файла совпадает с текущим коммитом (релиз: {:.8}...).",
-                                    info.tag_name,
-                                    remote_sub
+                                    "Обновлений нет. Последний релиз: {}. {hash_status}",
+                                    info.tag_name
                                 ).into());
                             }
                         }
@@ -149,7 +168,11 @@ pub fn run() {
         if let Some(app) = release_weak.upgrade() {
             let url = app.get_release_url();
             let url_str = url.as_str();
-            updater::open_releases(if url_str.is_empty() { None } else { Some(url_str) });
+            updater::open_releases(if url_str.is_empty() {
+                None
+            } else {
+                Some(url_str)
+            });
         }
     });
 
@@ -170,7 +193,10 @@ pub fn run() {
     let active_prof = get_active_profile(&initial_profiles);
     let initial_dpi_presets = active_prof.dpi_presets.clone();
     let dpi_presets_model = Rc::new(VecModel::<i32>::from(
-        initial_dpi_presets.iter().map(|&x| x as i32).collect::<Vec<_>>()
+        initial_dpi_presets
+            .iter()
+            .map(|&x| x as i32)
+            .collect::<Vec<_>>(),
     ));
     app.set_dpi_presets(ModelRc::from(dpi_presets_model.clone()));
     let dpi_presets = Arc::new(Mutex::new(initial_dpi_presets));
@@ -178,9 +204,10 @@ pub fn run() {
     // 2. Data state
     let lghub_settings = Arc::new(LgHubSettings::load_from_db().ok());
     let custom_macros = Arc::new(Mutex::new(load_custom_macros()));
-    let keybinds = Arc::new(Mutex::new(load_bindings()));
+    let keybinds = Arc::new(Mutex::new(active_prof.keybinds.clone()));
 
-    let active_id = get_active_profile_id();
+    let active_id = active_prof.id.clone();
+    app.set_active_profile_id(active_id.clone().into());
     app.set_active_profile_name(active_prof.name.into());
     let profiles = Arc::new(Mutex::new(initial_profiles));
     let g9_locked = Arc::new(std::sync::atomic::AtomicBool::new(get_g9_lock()));
@@ -193,20 +220,27 @@ pub fn run() {
     }
 
     // 4. Macro execution & background listener state
-    let active_macro: Arc<Mutex<Option<(String, macro_engine::ActiveMacro)>>> = Arc::new(Mutex::new(None));
+    let player = Arc::new(macro_engine::MacroPlayer::default());
     let initial_binds = keybinds.lock().map(|g| g.clone()).unwrap_or_default();
     let listener = Arc::new(KeybindListener::new(initial_binds));
 
     // 5. Wire background trigger callback and Esc emergency panic stop
-    setup_macro_triggers(&listener, &active_macro, &custom_macros, &lghub_settings, &app);
+    setup_macro_triggers(&listener, &player, &custom_macros, &lghub_settings, &app);
 
     // 6. Start keybind and macro trigger listener by default
     listener.restart();
     app.set_listener_active(listener.is_running());
 
     // 7. Initialize modular controllers
-    let device_worker = init_device_worker(&app, &dpi_presets_model, &dpi_presets, &profiles, &g9_locked, &listener);
-    setup_macro_controller(&MacroControllerContext {
+    let device_worker = init_device_worker(
+        &app,
+        &dpi_presets_model,
+        &dpi_presets,
+        &profiles,
+        &g9_locked,
+        &listener,
+    );
+    let _macro_completion_timer = setup_macro_controller(&MacroControllerContext {
         app: &app,
         macro_model: &macro_model,
         keybind_model: &keybind_model,
@@ -214,10 +248,19 @@ pub fn run() {
         custom_macros: &custom_macros,
         lghub_settings: &lghub_settings,
         keybinds: &keybinds,
-        active_macro: &active_macro,
+        player: &player,
         listener: &listener,
+        profiles: &profiles,
+        profile_model: &profile_model,
     });
-    setup_keybind_controller(&app, &keybind_model, &keybinds, &listener, &profiles, &profile_model);
+    setup_keybind_controller(
+        &app,
+        &keybind_model,
+        &keybinds,
+        &listener,
+        &profiles,
+        &profile_model,
+    );
     setup_profile_controller(&ProfileControllerContext {
         app: &app,
         profile_model: &profile_model,
@@ -227,6 +270,7 @@ pub fn run() {
         dpi_presets: &dpi_presets,
         keybinds: &keybinds,
         listener: &listener,
+        player: &player,
     });
 
     // 8. Unlike ComponentHandle::run(), keep the event loop alive after the
@@ -236,14 +280,10 @@ pub fn run() {
         eprintln!("[!] Ошибка выполнения Slint: {e}");
     }
 
-    // Keep the integration alive until the event loop has actually stopped.
-    drop(tray);
-
-    // 9. Clean up running macro and background listener on window close
-    drop(device_worker);
+    // Both tray exit and closing without a tray reach the same cleanup. Release
+    // input first, then let any in-flight device operation finish saving.
     listener.stop();
-    let mut slot = active_macro.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, active)) = slot.take() {
-        active.stop();
-    }
+    player.stop();
+    drop(device_worker);
+    drop(tray);
 }

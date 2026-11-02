@@ -1,13 +1,12 @@
+use slint::{ComponentHandle, VecModel};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use slint::{ComponentHandle, VecModel};
 
-use super::bridge::{MainWindow, ProfileItem, KeybindItem};
-use super::models::{update_ui_profile_list, update_ui_keybind_list};
-use crate::lghub::{
-    AppProfile, save_profiles, set_active_profile_id, get_active_profile_id,
-    delete_profile_by_id, ButtonBinding, KeybindListener, save_bindings,
-};
+use super::bridge::{KeybindItem, MainWindow, ProfileItem};
+use super::models::{update_ui_keybind_list, update_ui_profile_list};
+use crate::lghub::macro_engine::MacroPlayer;
+use crate::lghub::profile_store::{ProfileStore, new_profile_id};
+use crate::lghub::{AppProfile, ButtonBinding, KeybindListener};
 
 pub struct ProfileControllerContext<'a> {
     pub app: &'a MainWindow,
@@ -18,191 +17,434 @@ pub struct ProfileControllerContext<'a> {
     pub dpi_presets: &'a Arc<Mutex<Vec<u16>>>,
     pub keybinds: &'a Arc<Mutex<Vec<ButtonBinding>>>,
     pub listener: &'a Arc<KeybindListener>,
+    pub player: &'a Arc<MacroPlayer>,
+}
+
+#[derive(Clone)]
+struct ProfileState {
+    profiles: Arc<Mutex<Vec<AppProfile>>>,
+    dpi_presets: Arc<Mutex<Vec<u16>>>,
+    keybinds: Arc<Mutex<Vec<ButtonBinding>>>,
+    listener: Arc<KeybindListener>,
+    player: Arc<MacroPlayer>,
+}
+
+impl ProfileState {
+    fn activate(
+        &self,
+        store: &ProfileStore,
+        id: &str,
+        replacement: Option<Vec<AppProfile>>,
+    ) -> Result<AppProfile, String> {
+        // Match the preset/binding editors' lock order. Acquire every fallible
+        // state guard before committing, so publication cannot partially fail.
+        let mut presets = self
+            .dpi_presets
+            .lock()
+            .map_err(|_| "Настройки DPI недоступны")?;
+        let mut bindings = self.keybinds.lock().map_err(|_| "Назначения недоступны")?;
+        let mut profiles = self.profiles.lock().map_err(|_| "Профили недоступны")?;
+        let selected = match &replacement {
+            Some(next) => store.replace_and_activate(next, id)?,
+            None => store.activate(&profiles, id)?,
+        };
+        self.player.stop();
+        self.listener.release_buttons();
+        if let Some(next) = replacement {
+            *profiles = next;
+        }
+        *presets = selected.dpi_presets.clone();
+        *bindings = selected.keybinds.clone();
+        self.listener.update_bindings(bindings.clone());
+        Ok(selected)
+    }
+}
+
+#[derive(Clone)]
+struct ProfileController {
+    weak: slint::Weak<MainWindow>,
+    profile_model: Rc<VecModel<ProfileItem>>,
+    dpi_model: Rc<VecModel<i32>>,
+    keybind_model: Rc<VecModel<KeybindItem>>,
+    state: ProfileState,
+    store: ProfileStore,
+}
+
+impl ProfileController {
+    fn report(&self, result: Result<(), String>) {
+        if let Err(error) = result
+            && let Some(app) = self.weak.upgrade()
+        {
+            app.set_status_msg(format!("Не удалось изменить профиль: {error}").into());
+        }
+    }
+
+    // Switching and deleting the active profile share this complete transition.
+    fn activate(&self, id: &str, replacement: Option<Vec<AppProfile>>) -> Result<(), String> {
+        let Some(app) = self.weak.upgrade() else {
+            return Ok(());
+        };
+        let selected = self.state.activate(&self.store, id, replacement)?;
+        self.dpi_model.set_vec(
+            selected
+                .dpi_presets
+                .iter()
+                .map(|&dpi| i32::from(dpi))
+                .collect::<Vec<_>>(),
+        );
+        let profiles = self
+            .state
+            .profiles
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        update_ui_profile_list(&self.profile_model, &profiles, &selected.id);
+        drop(profiles);
+        update_ui_keybind_list(&self.keybind_model, &self.state.keybinds);
+        app.set_active_macro_name("".into());
+        app.set_active_profile_id(selected.id.clone().into());
+        app.set_active_profile_name(selected.name.clone().into());
+        app.set_status_msg(format!("Профиль '{}' выбран. Применяется DPI…", selected.name).into());
+        app.invoke_apply_profile_dpi(
+            selected.id.into(),
+            selected.name.into(),
+            i32::from(selected.current_dpi),
+        );
+        Ok(())
+    }
+
+    fn insert(&self, profile: AppProfile) -> Result<(), String> {
+        let mut profiles = self
+            .state
+            .profiles
+            .lock()
+            .map_err(|_| "Профили недоступны")?;
+        let mut next = profiles.clone();
+        next.push(profile);
+        self.store.save_list(&next)?;
+        *profiles = next;
+        if let Some(app) = self.weak.upgrade() {
+            update_ui_profile_list(
+                &self.profile_model,
+                &profiles,
+                app.get_active_profile_id().as_str(),
+            );
+        }
+        Ok(())
+    }
+
+    fn create(&self, name: &str, description: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Укажите название профиля".into());
+        }
+        let presets = self
+            .state
+            .dpi_presets
+            .lock()
+            .map_err(|_| "Настройки DPI недоступны")?
+            .clone();
+        let keybinds = self
+            .state
+            .keybinds
+            .lock()
+            .map_err(|_| "Назначения недоступны")?
+            .clone();
+        let id = new_profile_id(
+            &self
+                .state
+                .profiles
+                .lock()
+                .map_err(|_| "Профили недоступны")?,
+        );
+        let Some(app) = self.weak.upgrade() else {
+            return Ok(());
+        };
+        let current_dpi = u16::try_from(app.get_current_dpi())
+            .ok()
+            .filter(|dpi| (100..=25600).contains(dpi))
+            .unwrap_or_else(|| presets.first().copied().unwrap_or(800));
+        self.insert(AppProfile {
+            id,
+            name: name.into(),
+            description: if description.trim().is_empty() {
+                "Пользовательский профиль".into()
+            } else {
+                description.trim().into()
+            },
+            dpi_presets: presets,
+            current_dpi,
+            keybinds,
+            rgb_mode: "static".into(),
+            rgb_color: (0, 229, 255),
+        })?;
+        app.set_status_msg(format!("Создан профиль '{name}'").into());
+        Ok(())
+    }
+
+    fn duplicate(&self, id: &str) -> Result<(), String> {
+        let mut copy = {
+            let profiles = self
+                .state
+                .profiles
+                .lock()
+                .map_err(|_| "Профили недоступны")?;
+            let mut copy = profiles
+                .iter()
+                .find(|profile| profile.id == id)
+                .ok_or("Исходный профиль не найден")?
+                .clone();
+            copy.id = new_profile_id(&profiles);
+            copy
+        };
+        copy.name = format!("{} (Копия)", copy.name);
+        let name = copy.name.clone();
+        self.insert(copy)?;
+        if let Some(app) = self.weak.upgrade() {
+            app.set_status_msg(format!("Создан профиль '{name}'").into());
+        }
+        Ok(())
+    }
+
+    fn delete(&self, id: &str) -> Result<(), String> {
+        let Some(app) = self.weak.upgrade() else {
+            return Ok(());
+        };
+        let mut next = self
+            .state
+            .profiles
+            .lock()
+            .map_err(|_| "Профили недоступны")?
+            .clone();
+        let name = next
+            .iter()
+            .find(|profile| profile.id == id)
+            .ok_or("Профиль не найден")?
+            .name
+            .clone();
+        if next.len() <= 1 {
+            return Err("Невозможно удалить единственный профиль".into());
+        }
+        next.retain(|profile| profile.id != id);
+        if app.get_active_profile_id().as_str() == id {
+            let next_id = next[0].id.clone();
+            self.activate(&next_id, Some(next))?;
+            // Activation's status also reports the pending hardware operation.
+        } else {
+            let mut profiles = self
+                .state
+                .profiles
+                .lock()
+                .map_err(|_| "Профили недоступны")?;
+            self.store.save_list(&next)?;
+            *profiles = next;
+            update_ui_profile_list(
+                &self.profile_model,
+                &profiles,
+                app.get_active_profile_id().as_str(),
+            );
+            app.set_status_msg(format!("Профиль '{name}' удалён").into());
+        }
+        Ok(())
+    }
+
+    fn next(&self) -> Result<(), String> {
+        let Some(app) = self.weak.upgrade() else {
+            return Ok(());
+        };
+        let id = {
+            let profiles = self
+                .state
+                .profiles
+                .lock()
+                .map_err(|_| "Профили недоступны")?;
+            let index = profiles
+                .iter()
+                .position(|profile| profile.id == app.get_active_profile_id().as_str())
+                .ok_or("Активный профиль не найден")?;
+            profiles[(index + 1) % profiles.len()].id.clone()
+        };
+        self.activate(&id, None)
+    }
 }
 
 pub fn setup_profile_controller(ctx: &ProfileControllerContext) {
-    let app = ctx.app;
-    let profile_model = ctx.profile_model;
-    let dpi_presets_model = ctx.dpi_presets_model;
-    let keybind_model = ctx.keybind_model;
-    let profiles_arc = ctx.profiles;
-    let dpi_presets_arc = ctx.dpi_presets;
-    let keybinds_arc = ctx.keybinds;
-    let listener = ctx.listener;
-
-    let weak = app.as_weak();
-    let profile_list = profiles_arc.clone();
-    app.on_next_app_profile(move || {
-        let active_id = get_active_profile_id();
-        let next = profile_list.lock().ok().and_then(|profiles| {
-            if profiles.is_empty() { return None; }
-            let index = profiles.iter().position(|p| p.id == active_id).unwrap_or(0);
-            Some(profiles[(index + 1) % profiles.len()].id.clone())
-        });
-        if let (Some(app), Some(id)) = (weak.upgrade(), next) { app.invoke_switch_profile(id.into()); }
-    });
-
-    // Switch Profile Callback
-    let app_weak = app.as_weak();
-    let prof_ref = profiles_arc.clone();
-    let prof_model_ref = profile_model.clone();
-    let dpi_model_ref = dpi_presets_model.clone();
-    let keybind_model_ref = keybind_model.clone();
-    let dpi_arc = dpi_presets_arc.clone();
-    let keybinds_arc_clone = keybinds_arc.clone();
-    let listener_ref = listener.clone();
-
-    app.on_switch_profile(move |id| {
-        let id_str = id.as_str().trim();
-        let target_profile = {
-            if let Ok(profs) = prof_ref.lock() {
-                profs.iter().find(|p| p.id == id_str).cloned()
-            } else {
-                None
-            }
-        };
-
-        if let Some(p) = target_profile {
-            let _ = set_active_profile_id(&p.id);
-
-            // 1. Update DPI presets
-            if let Ok(mut presets) = dpi_arc.lock() {
-                *presets = p.dpi_presets.clone();
-            }
-            dpi_model_ref.set_vec(p.dpi_presets.iter().map(|&x| x as i32).collect::<Vec<_>>());
-
-            // 2. Update Keybindings & Listener
-            if let Ok(mut binds) = keybinds_arc_clone.lock() {
-                *binds = p.keybinds.clone();
-                let _ = save_bindings(&binds);
-                listener_ref.update_bindings(binds.clone());
-            }
-            update_ui_keybind_list(&keybind_model_ref, &keybinds_arc_clone);
-
-            // 3. Update Profiles list UI
-            if let Ok(profs) = prof_ref.lock() {
-                update_ui_profile_list(&prof_model_ref, &profs, &p.id);
-            }
-
-            // 4. Update Window UI & Device DPI
-            if let Some(app) = app_weak.upgrade() {
-                app.set_active_profile_name(p.name.clone().into());
-                app.invoke_set_dpi(p.current_dpi as i32);
-                app.set_status_msg(format!("Активирован профиль: '{}'", p.name).into());
-                println!("[+] Profile activated: '{}' (ID: {})", p.name, p.id);
-            }
+    let controller = ProfileController {
+        weak: ctx.app.as_weak(),
+        profile_model: ctx.profile_model.clone(),
+        dpi_model: ctx.dpi_presets_model.clone(),
+        keybind_model: ctx.keybind_model.clone(),
+        state: ProfileState {
+            profiles: ctx.profiles.clone(),
+            dpi_presets: ctx.dpi_presets.clone(),
+            keybinds: ctx.keybinds.clone(),
+            listener: ctx.listener.clone(),
+            player: ctx.player.clone(),
+        },
+        store: ProfileStore::user(),
+    };
+    let state = controller.clone();
+    ctx.app
+        .on_switch_profile(move |id| state.report(state.activate(id.trim(), None)));
+    let state = controller.clone();
+    ctx.app
+        .on_next_app_profile(move || state.report(state.next()));
+    let state = controller.clone();
+    ctx.app.on_refresh_profile_models(move || {
+        if let Some(app) = state.weak.upgrade()
+            && let Ok(profiles) = state.state.profiles.lock()
+        {
+            update_ui_profile_list(
+                &state.profile_model,
+                &profiles,
+                app.get_active_profile_id().as_str(),
+            );
         }
     });
-
-    // Create Profile Callback
-    let app_weak = app.as_weak();
-    let prof_ref = profiles_arc.clone();
-    let prof_model_ref = profile_model.clone();
-    let dpi_arc = dpi_presets_arc.clone();
-    let keybinds_arc_clone = keybinds_arc.clone();
-
-    app.on_create_profile(move |name, desc| {
-        let name_str = name.trim().to_string();
-        if name_str.is_empty() {
-            return;
-        }
-        let desc_str = desc.trim().to_string();
-        let new_id = format!("prof_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
-
-        let current_presets = dpi_arc.lock().map(|g| g.clone()).unwrap_or_else(|_| vec![400, 800, 1600]);
-        let current_binds = keybinds_arc_clone.lock().map(|g| g.clone()).unwrap_or_default();
-        let current_dpi = current_presets.first().copied().unwrap_or(800);
-
-        let new_profile = AppProfile {
-            id: new_id.clone(),
-            name: name_str.clone(),
-            description: if desc_str.is_empty() { "Пользовательский профиль".into() } else { desc_str },
-            dpi_presets: current_presets,
-            current_dpi,
-            rgb_mode: "static".into(),
-            rgb_color: (0, 229, 255),
-            keybinds: current_binds,
-        };
-
-        if let Ok(mut profs) = prof_ref.lock() {
-            profs.push(new_profile);
-            let _ = save_profiles(&profs);
-            let active_id = get_active_profile_id();
-            update_ui_profile_list(&prof_model_ref, &profs, &active_id);
-        }
-
-        if let Some(app) = app_weak.upgrade() {
-            app.set_status_msg(format!("Создан новый профиль '{}'", name_str).into());
-            println!("[+] Created new profile '{}'", name_str);
-        }
+    let state = controller.clone();
+    ctx.app.on_create_profile(move |name, description| {
+        state.report(state.create(&name, &description))
     });
+    let state = controller.clone();
+    ctx.app
+        .on_duplicate_profile(move |id| state.report(state.duplicate(id.trim())));
+    let state = controller.clone();
+    ctx.app
+        .on_delete_profile(move |id| state.report(state.delete(id.trim())));
+    // Restore the selected profile through the same path used by later switches.
+    controller.report(controller.activate(ctx.app.get_active_profile_id().as_str(), None));
+}
 
-    // Duplicate Profile Callback
-    let app_weak = app.as_weak();
-    let prof_ref = profiles_arc.clone();
-    let prof_model_ref = profile_model.clone();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lghub::{
+        keybinds::load_bindings_from_path,
+        profiles::{default_profiles, get_active_profile_id_from_path, load_profiles_from_path},
+    };
 
-    app.on_duplicate_profile(move |id| {
-        let id_str = id.as_str().trim();
-        let duplicate = {
-            if let Ok(profs) = prof_ref.lock() {
-                profs.iter().find(|p| p.id == id_str).cloned().map(|mut p| {
-                    p.id = format!("prof_copy_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
-                    p.name = format!("{} (Копия)", p.name);
-                    p
-                })
-            } else {
-                None
-            }
-        };
-
-        if let Some(p) = duplicate {
-            let p_name = p.name.clone();
-            if let Ok(mut profs) = prof_ref.lock() {
-                profs.push(p);
-                let _ = save_profiles(&profs);
-                let active_id = get_active_profile_id();
-                update_ui_profile_list(&prof_model_ref, &profs, &active_id);
-            }
-            if let Some(app) = app_weak.upgrade() {
-                app.set_status_msg(format!("Профиль '{}' успешно продублирован", p_name).into());
-            }
+    fn state(profiles: Vec<AppProfile>) -> ProfileState {
+        ProfileState {
+            dpi_presets: Arc::new(Mutex::new(profiles[0].dpi_presets.clone())),
+            keybinds: Arc::new(Mutex::new(profiles[0].keybinds.clone())),
+            listener: Arc::new(KeybindListener::new(profiles[0].keybinds.clone())),
+            player: Arc::new(MacroPlayer::default()),
+            profiles: Arc::new(Mutex::new(profiles)),
         }
-    });
+    }
 
-    // Delete Profile Callback
-    let app_weak = app.as_weak();
-    let prof_ref = profiles_arc.clone();
-    let prof_model_ref = profile_model.clone();
+    #[test]
+    fn activation_publishes_the_same_bindings_and_presets_as_the_saved_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProfileStore::in_dir(dir.path());
+        let profiles = default_profiles();
+        store
+            .replace_and_activate(&profiles, &profiles[0].id)
+            .unwrap();
+        let current = state(profiles.clone());
+        let generation = current.player.generation();
+        let events = current.listener.event_generation();
+        let selected = current.activate(&store, &profiles[1].id, None).unwrap();
+        assert_eq!(selected, profiles[1]);
+        assert_eq!(*current.dpi_presets.lock().unwrap(), selected.dpi_presets);
+        assert_eq!(*current.keybinds.lock().unwrap(), selected.keybinds);
+        assert_eq!(*current.profiles.lock().unwrap(), profiles);
+        assert_eq!(
+            get_active_profile_id_from_path(&dir.path().join("active_profile.txt")),
+            selected.id
+        );
+        assert_eq!(
+            load_bindings_from_path(&dir.path().join("keybinds.json")),
+            selected.keybinds
+        );
+        assert_ne!(current.player.generation(), generation);
+        assert_ne!(current.listener.event_generation(), events);
+    }
 
-    app.on_delete_profile(move |id| {
-        let id_str = id.as_str().trim();
-        let mut deleted_name = String::new();
-        let res = if let Ok(mut profs) = prof_ref.lock() {
-            if let Some(p) = profs.iter().find(|p| p.id == id_str) {
-                deleted_name = p.name.clone();
-            }
-            delete_profile_by_id(&mut profs, id_str)
-        } else {
-            Ok(false)
-        };
+    #[test]
+    fn deleting_active_profile_uses_the_same_transition_for_all_runtime_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProfileStore::in_dir(dir.path());
+        let profiles = default_profiles();
+        store
+            .replace_and_activate(&profiles, &profiles[0].id)
+            .unwrap();
+        let current = state(profiles.clone());
+        let remaining = profiles[1..].to_vec();
+        let id = remaining[0].id.clone();
+        let selected = current
+            .activate(&store, &id, Some(remaining.clone()))
+            .unwrap();
+        assert_eq!(*current.profiles.lock().unwrap(), remaining);
+        assert_eq!(*current.dpi_presets.lock().unwrap(), selected.dpi_presets);
+        assert_eq!(*current.keybinds.lock().unwrap(), selected.keybinds);
+        assert_eq!(
+            load_profiles_from_path(&dir.path().join("profiles.json")),
+            remaining
+        );
+        assert_eq!(
+            get_active_profile_id_from_path(&dir.path().join("active_profile.txt")),
+            id
+        );
+    }
 
-        match res {
-            Ok(true) => {
-                if let Ok(profs) = prof_ref.lock() {
-                    let active_id = get_active_profile_id();
-                    update_ui_profile_list(&prof_model_ref, &profs, &active_id);
-                }
-                if let Some(app) = app_weak.upgrade() {
-                    app.set_status_msg(format!("Профиль '{}' удален", deleted_name).into());
-                }
-            }
-            Ok(false) => {}
-            Err(e) => {
-                if let Some(app) = app_weak.upgrade() {
-                    app.set_status_msg(e.into());
-                }
-            }
-        }
-    });
+    #[test]
+    fn invalid_activation_preserves_runtime_state_and_does_not_cancel_existing_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProfileStore::in_dir(dir.path());
+        let profiles = default_profiles();
+        store
+            .replace_and_activate(&profiles, &profiles[0].id)
+            .unwrap();
+        let current = state(profiles.clone());
+        let generation = current.player.generation();
+        let events = current.listener.event_generation();
+        assert!(current.activate(&store, "missing", None).is_err());
+        assert_eq!(*current.profiles.lock().unwrap(), profiles);
+        assert_eq!(
+            *current.dpi_presets.lock().unwrap(),
+            profiles[0].dpi_presets
+        );
+        assert_eq!(*current.keybinds.lock().unwrap(), profiles[0].keybinds);
+        assert_eq!(current.player.generation(), generation);
+        assert_eq!(current.listener.event_generation(), events);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_active_deletion_restores_files_and_preserves_all_runtime_state() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProfileStore::in_dir(dir.path());
+        let profiles = default_profiles();
+        store
+            .replace_and_activate(&profiles, &profiles[0].id)
+            .unwrap();
+        let current = state(profiles.clone());
+        let before = ["profiles.json", "keybinds.json", "active_profile.txt"]
+            .map(|name| std::fs::read(dir.path().join(name)).unwrap());
+        let generation = current.player.generation();
+        let events = current.listener.event_generation();
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(dir.path().join("active_profile.txt"))
+            .unwrap();
+        assert!(
+            current
+                .activate(&store, &profiles[1].id, Some(profiles[1..].to_vec()))
+                .is_err()
+        );
+        drop(lock);
+        assert_eq!(*current.profiles.lock().unwrap(), profiles);
+        assert_eq!(
+            *current.dpi_presets.lock().unwrap(),
+            profiles[0].dpi_presets
+        );
+        assert_eq!(*current.keybinds.lock().unwrap(), profiles[0].keybinds);
+        assert_eq!(current.player.generation(), generation);
+        assert_eq!(current.listener.event_generation(), events);
+        let after = ["profiles.json", "keybinds.json", "active_profile.txt"]
+            .map(|name| std::fs::read(dir.path().join(name)).unwrap());
+        assert_eq!(before, after);
+    }
 }

@@ -1,15 +1,15 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
-use serde::{Deserialize, Serialize};
 
 use super::button_actions::ButtonActions;
 use super::macro_engine::send_key_event;
-use super::storage::{get_storage_path as get_appdata_storage_path, atomic_write_file};
+use super::storage::{atomic_write_file, get_storage_path as get_appdata_storage_path};
 
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -229,7 +229,11 @@ pub fn save_bindings_to_path(bindings: &[ButtonBinding], path: &Path) -> Result<
 }
 
 /// Assign a macro to a specific button
-pub fn assign_button_macro(bindings: &mut [ButtonBinding], button_id: &str, macro_name: &str) -> bool {
+pub fn assign_button_macro(
+    bindings: &mut [ButtonBinding],
+    button_id: &str,
+    macro_name: &str,
+) -> bool {
     if let Some(b) = bindings.iter_mut().find(|b| b.button_id == button_id) {
         b.assigned_macro = macro_name.to_string();
         true
@@ -244,7 +248,11 @@ pub fn clear_button_macro(bindings: &mut [ButtonBinding], button_id: &str) -> bo
 }
 
 /// Update keybinding macro name when a custom macro is renamed
-pub fn rename_assigned_macro(bindings: &mut [ButtonBinding], old_name: &str, new_name: &str) -> bool {
+pub fn rename_assigned_macro(
+    bindings: &mut [ButtonBinding],
+    old_name: &str,
+    new_name: &str,
+) -> bool {
     let mut updated = false;
     for b in bindings.iter_mut() {
         if b.assigned_macro == old_name {
@@ -259,10 +267,11 @@ pub fn rename_assigned_macro(bindings: &mut [ButtonBinding], old_name: &str, new
 #[cfg(windows)]
 struct HookState {
     bindings: Arc<RwLock<Vec<ButtonBinding>>>,
-    trigger_tx: std::sync::mpsc::Sender<String>,
-    panic_tx: std::sync::mpsc::Sender<()>,
+    trigger_tx: std::sync::mpsc::Sender<(String, u64)>,
+    panic_tx: std::sync::mpsc::Sender<u64>,
     actions: Arc<Mutex<ButtonActions>>,
     running: Arc<AtomicBool>,
+    event_generation: Arc<AtomicU64>,
 }
 
 #[cfg(windows)]
@@ -274,16 +283,35 @@ static PRESSED_KEYS: Mutex<Option<HashSet<u16>>> = Mutex::new(None);
 #[cfg(windows)]
 fn check_and_dispatch_button(btn_id: &str, down: bool) -> bool {
     let guard = GLOBAL_HOOK.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(state) = guard.as_ref() else { return false; };
-    if !state.running.load(Ordering::SeqCst) { return false; }
-    let assignment = state.bindings.read().ok().and_then(|binds|
-        binds.iter().find(|b| b.button_id == btn_id).map(|b| b.assigned_macro.clone())
-    ).unwrap_or_default();
+    let Some(state) = guard.as_ref() else {
+        return false;
+    };
+    if !state.running.load(Ordering::SeqCst) {
+        return false;
+    }
+    let generation = state.event_generation.load(Ordering::SeqCst);
+    let assignment = state
+        .bindings
+        .read()
+        .ok()
+        .and_then(|binds| {
+            binds
+                .iter()
+                .find(|b| b.button_id == btn_id)
+                .map(|b| b.assigned_macro.clone())
+        })
+        .unwrap_or_default();
     let mut actions = state.actions.lock().unwrap_or_else(|e| e.into_inner());
-    if !state.running.load(Ordering::SeqCst) { return false; }
+    if !state.running.load(Ordering::SeqCst) {
+        return false;
+    }
     let event = actions.transition(btn_id, down, &assignment);
-    for (vk, pressed) in event.keys { send_key_event(vk, pressed); }
-    if let Some(action) = event.action { let _ = state.trigger_tx.send(action); }
+    for (vk, pressed) in event.keys {
+        send_key_event(vk, pressed);
+    }
+    if let Some(action) = event.action {
+        let _ = state.trigger_tx.send((action, generation));
+    }
     event.suppress
 }
 
@@ -291,8 +319,14 @@ fn check_and_dispatch_button(btn_id: &str, down: bool) -> bool {
 fn check_and_dispatch_vk(vk: u16, down: bool) -> bool {
     let id = {
         let guard = GLOBAL_HOOK.lock().unwrap_or_else(|e| e.into_inner());
-        guard.as_ref().and_then(|state| state.bindings.read().ok().and_then(|binds|
-            binds.iter().find(|b| !b.is_mouse_button && b.vk_code == vk).map(|b| b.button_id.clone())))
+        guard.as_ref().and_then(|state| {
+            state.bindings.read().ok().and_then(|binds| {
+                binds
+                    .iter()
+                    .find(|b| !b.is_mouse_button && b.vk_code == vk)
+                    .map(|b| b.button_id.clone())
+            })
+        })
     };
     id.is_some_and(|id| check_and_dispatch_button(&id, down))
 }
@@ -301,7 +335,11 @@ fn check_and_dispatch_vk(vk: u16, down: bool) -> bool {
 fn dispatch_panic_stop() {
     let guard = GLOBAL_HOOK.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(state) = guard.as_ref() {
-        let _ = state.panic_tx.send(());
+        let generation = state
+            .event_generation
+            .fetch_add(1, Ordering::SeqCst)
+            .wrapping_add(1);
+        let _ = state.panic_tx.send(generation);
     }
 }
 
@@ -340,11 +378,18 @@ unsafe extern "system" fn low_level_mouse_proc(code: i32, wparam: usize, lparam:
 
             if let Some(id) = btn_id {
                 let msg = wparam as u32;
-                let down = !matches!(msg, WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP | WM_XBUTTONUP);
+                let down = !matches!(
+                    msg,
+                    WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP | WM_XBUTTONUP
+                );
                 let suppress = check_and_dispatch_button(id, down);
                 // Wheel tilt notifications are pulses, without a separate release.
-                if msg == WM_MOUSEHWHEEL { check_and_dispatch_button(id, false); }
-                if suppress { return 1; }
+                if msg == WM_MOUSEHWHEEL {
+                    check_and_dispatch_button(id, false);
+                }
+                if suppress {
+                    return 1;
+                }
             }
         }
     }
@@ -352,7 +397,11 @@ unsafe extern "system" fn low_level_mouse_proc(code: i32, wparam: usize, lparam:
 }
 
 #[cfg(windows)]
-unsafe extern "system" fn low_level_keyboard_proc(code: i32, wparam: usize, lparam: isize) -> isize {
+unsafe extern "system" fn low_level_keyboard_proc(
+    code: i32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
     if code >= 0 && lparam != 0 {
         let msg = wparam as u32;
         let kbd = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
@@ -371,27 +420,32 @@ unsafe extern "system" fn low_level_keyboard_proc(code: i32, wparam: usize, lpar
                 set.insert(vk);
                 drop(guard);
                 // The router deduplicates repeats while still suppressing them.
-                if check_and_dispatch_vk(vk, true) { return 1; }
+                if check_and_dispatch_vk(vk, true) {
+                    return 1;
+                }
             } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
                 let mut guard = PRESSED_KEYS.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(set) = guard.as_mut() {
                     set.remove(&vk);
                 }
                 drop(guard);
-                if check_and_dispatch_vk(vk, false) { return 1; }
+                if check_and_dispatch_vk(vk, false) {
+                    return 1;
+                }
             }
         }
     }
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
 }
 
-type CallbackFn = Arc<dyn Fn(String) + Send + Sync + 'static>;
+type CallbackFn = Arc<dyn Fn(String, u64) + Send + Sync + 'static>;
 type PanicFn = Arc<dyn Fn() + Send + Sync + 'static>;
 
 /// Active background listener for global key and mouse button triggers
 pub struct KeybindListener {
     actions: Arc<Mutex<ButtonActions>>,
     running: Arc<AtomicBool>,
+    event_generation: Arc<AtomicU64>,
     thread_id: Arc<AtomicU32>,
     hook_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     bindings: Arc<RwLock<Vec<ButtonBinding>>>,
@@ -404,6 +458,7 @@ impl KeybindListener {
         Self {
             actions: Arc::new(Mutex::new(ButtonActions::default())),
             running: Arc::new(AtomicBool::new(false)),
+            event_generation: Arc::new(AtomicU64::new(0)),
             thread_id: Arc::new(AtomicU32::new(0)),
             hook_thread: Mutex::new(None),
             bindings: Arc::new(RwLock::new(initial_bindings)),
@@ -425,12 +480,28 @@ impl KeybindListener {
     where
         F: Fn(String) + Send + Sync + 'static,
     {
+        self.set_event_callback(move |name, _| callback(name));
+    }
+
+    pub fn set_event_callback<F>(&self, callback: F)
+    where
+        F: Fn(String, u64) + Send + Sync + 'static,
+    {
         if let Ok(mut lock) = self.callback.write() {
             *lock = Some(Arc::new(callback));
         }
     }
 
+    pub fn event_generation(&self) -> u64 {
+        self.event_generation.load(Ordering::SeqCst)
+    }
+
+    pub fn invalidate_pending_events(&self) {
+        self.event_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
     pub fn update_bindings(&self, new_bindings: Vec<ButtonBinding>) {
+        self.invalidate_pending_events();
         if let Ok(mut lock) = self.bindings.write() {
             *lock = new_bindings;
         }
@@ -438,25 +509,47 @@ impl KeybindListener {
 
     /// Dispatch a physical G6-G9 transition from MouseButtonSpy, not a fake F-key.
     pub fn hardware_button(&self, button: &str, down: bool, default: &str) {
-        if !self.is_running() { return; }
-        let assignment = self.bindings.read().ok().and_then(|binds|
-            binds.iter().find(|b| b.button_id == button).map(|b| b.assigned_macro.clone())
-        ).filter(|a| !a.is_empty()).unwrap_or_else(|| default.into());
+        if !self.is_running() {
+            return;
+        }
+        let generation = self.event_generation();
+        let assignment = self
+            .bindings
+            .read()
+            .ok()
+            .and_then(|binds| {
+                binds
+                    .iter()
+                    .find(|b| b.button_id == button)
+                    .map(|b| b.assigned_macro.clone())
+            })
+            .filter(|a| !a.is_empty())
+            .unwrap_or_else(|| default.into());
         let action = {
             let mut state = self.actions.lock().unwrap_or_else(|e| e.into_inner());
-            if !self.is_running() { return; }
+            if !self.is_running() {
+                return;
+            }
             let event = state.transition(button, down, &assignment);
-            for (vk, pressed) in event.keys { send_key_event(vk, pressed); }
+            for (vk, pressed) in event.keys {
+                send_key_event(vk, pressed);
+            }
             event.action
         };
         if let Some(action) = action
             && let Ok(callback) = self.callback.read()
-            && let Some(callback) = callback.as_ref() { callback(action); }
+            && let Some(callback) = callback.as_ref()
+        {
+            callback(action, generation);
+        }
     }
 
     pub fn release_buttons(&self) {
+        self.invalidate_pending_events();
         let mut state = self.actions.lock().unwrap_or_else(|e| e.into_inner());
-        for (vk, down) in state.release_all() { send_key_event(vk, down); }
+        for (vk, down) in state.release_all() {
+            send_key_event(vk, down);
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -475,7 +568,12 @@ impl KeybindListener {
                 PostThreadMessageW(tid, WM_QUIT, 0, 0);
             }
         }
-        if let Some(handle) = self.hook_thread.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if let Some(handle) = self
+            .hook_thread
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             let _ = handle.join();
         }
     }
@@ -511,7 +609,7 @@ impl KeybindListener {
     where
         F: Fn(String) + Send + Sync + 'static,
     {
-        let cb_arc: CallbackFn = Arc::new(callback);
+        let cb_arc: CallbackFn = Arc::new(move |name, _| callback(name));
         if let Ok(mut lock) = self.callback.write() {
             *lock = Some(cb_arc.clone());
         }
@@ -529,27 +627,39 @@ impl KeybindListener {
         let bindings_arc = self.bindings.clone();
         let panic_cb_arc = self.panic_callback.clone();
         let actions_arc = self.actions.clone();
+        let event_generation = self.event_generation.clone();
 
         #[cfg(windows)]
         {
-            let (tx, rx) = std::sync::mpsc::channel::<String>();
-            let (panic_tx, panic_rx) = std::sync::mpsc::channel::<()>();
+            let (tx, rx) = std::sync::mpsc::channel::<(String, u64)>();
+            let (panic_tx, panic_rx) = std::sync::mpsc::channel::<u64>();
 
             // Single dedicated worker thread for triggered macros (Item 9)
             let cb_worker = callback.clone();
+            let worker_generation = event_generation.clone();
             thread::spawn(move || {
-                while let Ok(macro_name) = rx.recv() {
-                    cb_worker(macro_name);
+                while let Ok((macro_name, generation)) = rx.recv() {
+                    if worker_generation.load(Ordering::SeqCst) == generation {
+                        cb_worker(macro_name, generation);
+                    }
                 }
             });
 
             // Single dedicated worker thread for emergency panic stop (Item 12)
+            let panic_generation = event_generation.clone();
+            let panic_running = running.clone();
             thread::spawn(move || {
-                while let Ok(()) = panic_rx.recv() {
+                while let Ok(generation) = panic_rx.recv() {
+                    if !panic_running.load(Ordering::SeqCst)
+                        || panic_generation.load(Ordering::SeqCst) != generation
+                    {
+                        continue;
+                    }
                     if let Ok(guard) = panic_cb_arc.read()
-                        && let Some(cb) = guard.as_ref() {
-                            cb();
-                        }
+                        && let Some(cb) = guard.as_ref()
+                    {
+                        cb();
+                    }
                 }
             });
 
@@ -569,6 +679,7 @@ impl KeybindListener {
                         panic_tx: panic_tx_for_thread.clone(),
                         actions: actions_arc.clone(),
                         running: running.clone(),
+                        event_generation,
                     });
                 }
 
@@ -582,16 +693,34 @@ impl KeybindListener {
                 thread_id_store.store(cur_tid, Ordering::SeqCst);
 
                 // Attempt to install Windows Low-Level Hooks
-                let mouse_hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), std::ptr::null_mut(), 0) };
-                let kbd_hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), std::ptr::null_mut(), 0) };
+                let mouse_hook = unsafe {
+                    SetWindowsHookExW(
+                        WH_MOUSE_LL,
+                        Some(low_level_mouse_proc),
+                        std::ptr::null_mut(),
+                        0,
+                    )
+                };
+                let kbd_hook = unsafe {
+                    SetWindowsHookExW(
+                        WH_KEYBOARD_LL,
+                        Some(low_level_keyboard_proc),
+                        std::ptr::null_mut(),
+                        0,
+                    )
+                };
 
                 if !mouse_hook.is_null() && !kbd_hook.is_null() {
-                    println!("[+] Low-level Mouse & Keyboard hooks installed successfully (0% CPU event mode).");
+                    println!(
+                        "[+] Low-level Mouse & Keyboard hooks installed successfully (0% CPU event mode)."
+                    );
                     let mut msg: MSG = unsafe { std::mem::zeroed() };
                     unsafe {
                         PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
                         let _ = ready_tx.send(true);
-                        while running.load(Ordering::SeqCst) && GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                        while running.load(Ordering::SeqCst)
+                            && GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0
+                        {
                             TranslateMessage(&msg);
                             DispatchMessageW(&msg);
                         }
@@ -603,8 +732,16 @@ impl KeybindListener {
                         }
                     }
                 } else {
-                    if !mouse_hook.is_null() { unsafe { UnhookWindowsHookEx(mouse_hook); } }
-                    if !kbd_hook.is_null() { unsafe { UnhookWindowsHookEx(kbd_hook); } }
+                    if !mouse_hook.is_null() {
+                        unsafe {
+                            UnhookWindowsHookEx(mouse_hook);
+                        }
+                    }
+                    if !kbd_hook.is_null() {
+                        unsafe {
+                            UnhookWindowsHookEx(kbd_hook);
+                        }
+                    }
                     running.store(false, Ordering::SeqCst);
                     let _ = ready_tx.send(false);
                     eprintln!("[-] Windows input hooks could not be installed");
@@ -616,19 +753,33 @@ impl KeybindListener {
                     *guard = None;
                 }
                 running.store(false, Ordering::SeqCst);
-                for (vk, down) in actions_arc.lock().unwrap_or_else(|e| e.into_inner()).release_all() {
+                for (vk, down) in actions_arc
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .release_all()
+                {
                     send_key_event(vk, down);
                 }
                 thread_id_store.store(0, Ordering::SeqCst);
                 println!("[*] Global Keybind/Button Listener stopped.");
             });
             *self.hook_thread.lock().unwrap_or_else(|e| e.into_inner()) = Some(hook_thread);
-            if ready_rx.recv_timeout(Duration::from_secs(2)) != Ok(true) { self.stop(); }
+            if ready_rx.recv_timeout(Duration::from_secs(2)) != Ok(true) {
+                self.stop();
+            }
         }
 
         #[cfg(not(windows))]
         {
-            let _ = (running, thread_id_store, bindings_arc, callback, panic_cb_arc, actions_arc);
+            let _ = (
+                running,
+                thread_id_store,
+                bindings_arc,
+                callback,
+                panic_cb_arc,
+                actions_arc,
+                event_generation,
+            );
         }
     }
 }
@@ -636,6 +787,30 @@ impl KeybindListener {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hardware_events_keep_their_generation_and_context_changes_invalidate_them() {
+        let listener = KeybindListener::new(default_bindings());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let received = events.clone();
+        listener.set_event_callback(move |name, generation| {
+            received.lock().unwrap().push((name, generation));
+        });
+        listener.running.store(true, Ordering::SeqCst);
+        let old = listener.event_generation();
+        listener.hardware_button("G6", true, "macro");
+        listener.release_buttons();
+        let current = listener.event_generation();
+        assert_ne!(old, current);
+        listener.hardware_button("G6", true, "macro");
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![("macro".into(), old), ("macro".into(), current)]
+        );
+        listener.update_bindings(default_bindings());
+        assert_ne!(listener.event_generation(), current);
+        listener.stop();
+    }
 
     #[test]
     fn hardware_buttons_dispatch_real_edges_and_respect_listener_state() {
@@ -699,16 +874,14 @@ mod tests {
 
     #[test]
     fn test_keybinds_save_and_load_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("ghub_test_keybinds_{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
-        let path = dir.join("test_keybinds.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_keybinds.json");
 
         let mut binds = default_bindings();
         assign_button_macro(&mut binds, "G4", "Custom Clicker");
 
         save_bindings_to_path(&binds, &path).unwrap();
         let loaded = load_bindings_from_path(&path);
-        let _ = fs::remove_dir_all(&dir);
 
         assert_eq!(loaded.len(), binds.len());
         let g4 = loaded.iter().find(|b| b.button_id == "G4").unwrap();

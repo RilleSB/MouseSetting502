@@ -51,15 +51,15 @@ pub fn hid_usage_to_vk(usage: u32) -> Option<u16> {
         0x52 => Some(0x26), // VK_UP
 
         // Keypad
-        0x53 => Some(0x90), // VK_NUMLOCK
-        0x54 => Some(0x6F), // VK_DIVIDE
-        0x55 => Some(0x6A), // VK_MULTIPLY
-        0x56 => Some(0x6D), // VK_SUBTRACT
-        0x57 => Some(0x6B), // VK_ADD
-        0x58 => Some(0x0D), // VK_RETURN
+        0x53 => Some(0x90),                                  // VK_NUMLOCK
+        0x54 => Some(0x6F),                                  // VK_DIVIDE
+        0x55 => Some(0x6A),                                  // VK_MULTIPLY
+        0x56 => Some(0x6D),                                  // VK_SUBTRACT
+        0x57 => Some(0x6B),                                  // VK_ADD
+        0x58 => Some(0x0D),                                  // VK_RETURN
         0x59..=0x61 => Some((0x61 + (usage - 0x59)) as u16), // VK_NUMPAD1..VK_NUMPAD9
-        0x62 => Some(0x60), // VK_NUMPAD0
-        0x63 => Some(0x6E), // VK_DECIMAL
+        0x62 => Some(0x60),                                  // VK_NUMPAD0
+        0x63 => Some(0x6E),                                  // VK_DECIMAL
 
         // F13..F24 (HID 0x68..0x73 -> VK_F13..VK_F24: 0x7C..0x87)
         0x68..=0x73 => Some((0x7C + (usage - 0x68)) as u16),
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn test_letters() {
         assert_eq!(hid_usage_to_vk(0x04), Some(0x41)); // 'A'
-        assert_eq!(hid_usage_to_vk(16), Some(0x4D));   // 'M' (Usage 16)
+        assert_eq!(hid_usage_to_vk(16), Some(0x4D)); // 'M' (Usage 16)
         assert_eq!(hid_usage_to_vk(0x1D), Some(0x5A)); // 'Z'
     }
 

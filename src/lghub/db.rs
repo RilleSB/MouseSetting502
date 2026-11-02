@@ -1,8 +1,8 @@
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
-use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 
 use super::hid_to_vk::hid_usage_to_vk;
 
@@ -53,8 +53,11 @@ pub struct LgHubSettings {
 
 impl LgHubSettings {
     pub fn default_db_path() -> Result<PathBuf, String> {
-        let local_app_data = env::var("LOCALAPPDATA").map_err(|_| "LOCALAPPDATA env var not found")?;
-        let p = PathBuf::from(local_app_data).join("LGHUB").join("settings.db");
+        let local_app_data =
+            env::var("LOCALAPPDATA").map_err(|_| "LOCALAPPDATA env var not found")?;
+        let p = PathBuf::from(local_app_data)
+            .join("LGHUB")
+            .join("settings.db");
         if p.exists() {
             Ok(p)
         } else {
@@ -84,43 +87,81 @@ impl LgHubSettings {
             blob.pop();
         }
 
-        let json_str = String::from_utf8(blob).map_err(|e| format!("Blob is not valid UTF-8: {e}"))?;
-        let root: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| format!("JSON parse error: {e}"))?;
+        let json_str =
+            String::from_utf8(blob).map_err(|e| format!("Blob is not valid UTF-8: {e}"))?;
+        let root: serde_json::Value =
+            serde_json::from_str(&json_str).map_err(|e| format!("JSON parse error: {e}"))?;
 
         let mut cards = Vec::new();
-        if let Some(cards_arr) = root.get("cards").and_then(|c| c.get("cards")).and_then(|v| v.as_array()) {
+        if let Some(cards_arr) = root
+            .get("cards")
+            .and_then(|c| c.get("cards"))
+            .and_then(|v| v.as_array())
+        {
             for c in cards_arr {
-                let id = c.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                let name = c.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let attribute = c.get("attribute").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let id = c
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let name = c
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let attribute = c
+                    .get("attribute")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
 
                 let mut macro_data = None;
                 if let Some(m) = c.get("macro") {
                     let m_name = name.clone().unwrap_or_else(|| "Unnamed".into());
-                    let m_type = m.get("type").and_then(|v| v.as_str()).unwrap_or("UNKNOWN").to_string();
-                    let action_name = m.get("actionName").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let m_type = m
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("UNKNOWN")
+                        .to_string();
+                    let action_name = m
+                        .get("actionName")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
 
                     let mut components = Vec::new();
                     let mut is_toggle = false;
 
                     if let Some(seq) = m.get("sequence") {
-                        if let Some(toggle_seq) = seq.get("toggleSequence").and_then(|ts| ts.get("components")).and_then(|v| v.as_array()) {
+                        if let Some(toggle_seq) = seq
+                            .get("toggleSequence")
+                            .and_then(|ts| ts.get("components"))
+                            .and_then(|v| v.as_array())
+                        {
                             is_toggle = true;
                             for comp in toggle_seq {
                                 parse_component(comp, &mut components);
                             }
-                        } else if let Some(simple) = seq.get("simpleSequence").and_then(|ss| ss.get("components")).and_then(|v| v.as_array()) {
+                        } else if let Some(simple) = seq
+                            .get("simpleSequence")
+                            .and_then(|ss| ss.get("components"))
+                            .and_then(|v| v.as_array())
+                        {
                             for comp in simple {
                                 parse_component(comp, &mut components);
                             }
                         }
                     } else if let Some(keystroke) = m.get("keystroke") {
                         // Keystroke with modifiers: e.g. code: 16 ('M'), modifiers: [227] (LWin)
-                        let hid_code = keystroke.get("code").and_then(|v| v.as_u64()).map(|v| v as u32);
-                        let modifiers = keystroke.get("modifiers")
+                        let hid_code = keystroke
+                            .get("code")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32);
+                        let modifiers = keystroke
+                            .get("modifiers")
                             .and_then(|v| v.as_array())
-                            .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|c| c as u32)).collect::<Vec<_>>())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_u64().map(|c| c as u32))
+                                    .collect::<Vec<_>>()
+                            })
                             .unwrap_or_default();
 
                         // 1. Modifiers down
@@ -138,22 +179,23 @@ impl LgHubSettings {
 
                         // 2. Primary key down & up
                         if let Some(code) = hid_code
-                            && let Some(vk) = hid_usage_to_vk(code) {
-                                components.push(LgMacroComponent {
-                                    mouse_button: None,
-                                    mouse_down: None,
-                                    vk_code: Some(vk),
-                                    key_down: Some(true),
-                                    delay_ms: Some(10),
-                                });
-                                components.push(LgMacroComponent {
-                                    mouse_button: None,
-                                    mouse_down: None,
-                                    vk_code: Some(vk),
-                                    key_down: Some(false),
-                                    delay_ms: None,
-                                });
-                            }
+                            && let Some(vk) = hid_usage_to_vk(code)
+                        {
+                            components.push(LgMacroComponent {
+                                mouse_button: None,
+                                mouse_down: None,
+                                vk_code: Some(vk),
+                                key_down: Some(true),
+                                delay_ms: Some(10),
+                            });
+                            components.push(LgMacroComponent {
+                                mouse_button: None,
+                                mouse_down: None,
+                                vk_code: Some(vk),
+                                key_down: Some(false),
+                                delay_ms: None,
+                            });
+                        }
 
                         // 3. Modifiers up (reverse order)
                         for &mod_hid in modifiers.iter().rev() {
@@ -188,17 +230,40 @@ impl LgHubSettings {
         }
 
         let mut profiles = Vec::new();
-        if let Some(profs_arr) = root.get("profiles").and_then(|p| p.get("profiles")).and_then(|v| v.as_array()) {
+        if let Some(profs_arr) = root
+            .get("profiles")
+            .and_then(|p| p.get("profiles"))
+            .and_then(|v| v.as_array())
+        {
             for p in profs_arr {
-                let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("Default").to_string();
-                let app_id = p.get("applicationId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let active = p.get("activeForApplication").and_then(|v| v.as_bool()).unwrap_or(false);
+                let name = p
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Default")
+                    .to_string();
+                let app_id = p
+                    .get("applicationId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let active = p
+                    .get("activeForApplication")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
                 let mut assignments = Vec::new();
                 if let Some(assign_arr) = p.get("assignments").and_then(|v| v.as_array()) {
                     for a in assign_arr {
-                        let slot_id = a.get("slotId").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                        let card_id = a.get("cardId").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                        let slot_id = a
+                            .get("slotId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let card_id = a
+                            .get("cardId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
                         assignments.push(LgAssignment { slot_id, card_id });
                     }
                 }
@@ -246,23 +311,31 @@ fn parse_component(comp: &serde_json::Value, out: &mut Vec<LgMacroComponent>) {
     else if let Some(kb) = comp.get("keyboard") {
         let hid_usage = if let Some(s) = kb.get("hidUsage").and_then(|v| v.as_str()) {
             s.parse::<u32>().ok()
-        } else { kb.get("hidUsage").and_then(|v| v.as_u64()).map(|n| n as u32) };
+        } else {
+            kb.get("hidUsage")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32)
+        };
 
         if let Some(hid) = hid_usage
-            && let Some(vk) = hid_usage_to_vk(hid) {
-                let is_down = kb.get("isDown").and_then(|v| v.as_bool()).unwrap_or(false);
-                out.push(LgMacroComponent {
-                    mouse_button: None,
-                    mouse_down: None,
-                    vk_code: Some(vk),
-                    key_down: Some(is_down),
-                    delay_ms: None,
-                });
-            }
+            && let Some(vk) = hid_usage_to_vk(hid)
+        {
+            let is_down = kb.get("isDown").and_then(|v| v.as_bool()).unwrap_or(false);
+            out.push(LgMacroComponent {
+                mouse_button: None,
+                mouse_down: None,
+                vk_code: Some(vk),
+                key_down: Some(is_down),
+                delay_ms: None,
+            });
+        }
     }
     // 3. Delay component
     else if let Some(delay) = comp.get("delay") {
-        let ms = delay.get("durationMs").and_then(|v| v.as_u64()).unwrap_or(1);
+        let ms = delay
+            .get("durationMs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1);
         out.push(LgMacroComponent {
             mouse_button: None,
             mouse_down: None,

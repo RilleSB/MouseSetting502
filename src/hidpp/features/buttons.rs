@@ -15,8 +15,11 @@ pub fn start_button_spy(dev: &HidppDevice) -> Result<u8, String> {
 }
 
 pub fn button_bitmap(packet: &HidppPacket, index: u8) -> Option<u16> {
-    if packet.report_id != 0x11 || packet.feature_idx != index
-        || packet.function_id != 0 || packet.software_id != 0 {
+    if packet.report_id != 0x11
+        || packet.feature_idx != index
+        || packet.function_id != 0
+        || packet.software_id != 0
+    {
         return None;
     }
     let bytes = packet.params.get(..2)?;

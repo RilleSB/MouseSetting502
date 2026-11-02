@@ -1,154 +1,134 @@
+use slint::{ComponentHandle, VecModel};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use slint::{ComponentHandle, VecModel};
 
-use super::bridge::{MainWindow, MacroItem, KeybindItem};
-use super::models::{update_ui_macro_list, update_ui_keybind_list};
+use super::bridge::{KeybindItem, MacroItem, MainWindow, ProfileItem};
+use super::macro_persistence::MacroEditState;
+use super::models::{update_ui_keybind_list, update_ui_macro_list, update_ui_profile_list};
 use crate::lghub::{
-    LgHubSettings, LgMacro, LgMacroComponent, macro_engine,
-    custom_macros::{
-        update_custom_macro, delete_macro, format_component,
-    },
-    keybinds::{
-        ButtonBinding, KeybindListener, save_bindings, rename_assigned_macro,
-    },
+    AppProfile, LgHubSettings, LgMacro, LgMacroComponent,
+    custom_macros::format_component,
+    keybinds::{ButtonBinding, KeybindListener},
+    macro_engine::{MacroPlayer, PlaybackChange},
 };
+
+fn find_macro(
+    name: &str,
+    custom: &Mutex<Vec<LgMacro>>,
+    settings: &Option<LgHubSettings>,
+) -> Option<LgMacro> {
+    let name = name.trim();
+    custom
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|m| m.name.trim() == name)
+        .cloned()
+        .or_else(|| {
+            settings.as_ref()?.cards.iter().find_map(|card| {
+                let data = card.macro_data.as_ref()?;
+                (data.name.trim() == name || card.name.as_deref().is_some_and(|n| n.trim() == name))
+                    .then(|| data.clone())
+            })
+        })
+}
+
+fn toggle_macro(
+    app: &MainWindow,
+    player: &MacroPlayer,
+    listener: &KeybindListener,
+    data: LgMacro,
+    generation: u64,
+    from_trigger: bool,
+) {
+    let name = data.name.clone();
+    let change = if from_trigger {
+        player.trigger(data, generation)
+    } else {
+        player.toggle(data, generation)
+    };
+    match change {
+        PlaybackChange::Started => {
+            app.set_active_macro_name(name.clone().into());
+            app.set_status_msg(format!("Запущен макрос '{name}'").into());
+        }
+        PlaybackChange::Stopped => {
+            listener.invalidate_pending_events();
+            app.set_active_macro_name("".into());
+            app.set_status_msg(format!("Макрос '{name}' остановлен").into());
+        }
+        PlaybackChange::Stale => {}
+    }
+}
 
 pub fn setup_macro_triggers(
     listener: &Arc<KeybindListener>,
-    active_macro: &Arc<Mutex<Option<(String, macro_engine::ActiveMacro)>>>,
-    custom_macros: &Arc<Mutex<Vec<LgMacro>>>,
-    lghub_settings: &Arc<Option<LgHubSettings>>,
+    player: &Arc<MacroPlayer>,
+    custom: &Arc<Mutex<Vec<LgMacro>>>,
+    settings: &Arc<Option<LgHubSettings>>,
     app: &MainWindow,
 ) {
-    let act_slot = active_macro.clone();
-    let custom_ref = custom_macros.clone();
-    let lghub_ref = lghub_settings.clone();
-    let app_weak = app.as_weak();
-
-    listener.set_callback(move |macro_name: String| {
-        if macro_name == "__PROFILE_NEXT__" {
-            let weak = app_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(app) = weak.upgrade() { app.invoke_next_app_profile(); }
-            });
+    let weak = app.as_weak();
+    let listener_weak = Arc::downgrade(listener);
+    let runtime = player.clone();
+    let custom = custom.clone();
+    let settings = settings.clone();
+    listener.set_event_callback(move |name, event_generation| {
+        let Some(listener) = listener_weak.upgrade() else {
+            return;
+        };
+        if !listener.is_running() {
             return;
         }
-        if macro_name == "__DPI_DOWN__" {
-            let weak = app_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(app) = weak.upgrade() {
-                    app.invoke_dpi_down();
-                }
-            });
-            return;
-        }
-        if macro_name == "__DPI_UP__" {
-            let weak = app_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(app) = weak.upgrade() {
-                    app.invoke_dpi_up();
-                }
-            });
-            return;
-        }
-
-        let mut slot = act_slot.lock().unwrap_or_else(|e| e.into_inner());
-
-        if let Some((curr_name, active)) = slot.take() {
-            active.stop();
-            if curr_name == macro_name {
-                let weak = app_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(app) = weak.upgrade() {
-                        app.set_active_macro_name("".into());
-                        app.set_status_msg(format!("Триггер: макрос '{}' остановлен", curr_name).into());
-                    }
-                });
+        let generation = runtime.generation();
+        let runtime = runtime.clone();
+        let listener_weak = listener_weak.clone();
+        let weak = weak.clone();
+        let custom = custom.clone();
+        let settings = settings.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(listener) = listener_weak.upgrade() else {
+                return;
+            };
+            if !listener.is_running()
+                || listener.event_generation() != event_generation
+                || runtime.generation() != generation
+            {
                 return;
             }
-        }
-
-        println!("[*] Keybind Trigger: button dispatched macro '{}'", macro_name);
-
-        let target_macro = {
-            let found = if let Ok(custom) = custom_ref.lock() {
-                custom.iter().find(|m| m.name == macro_name || m.name.trim() == macro_name.trim()).cloned()
-            } else {
-                None
+            let Some(app) = weak.upgrade() else {
+                return;
             };
-            found.or_else(|| {
-                if let Some(ref data) = *lghub_ref {
-                    data.cards.iter().find_map(|c| {
-                        if c.name.as_deref() == Some(&macro_name)
-                            || c.macro_data.as_ref().map(|m| m.name.as_str()) == Some(&macro_name)
-                            || c.name.as_deref().map(|s| s.trim()) == Some(macro_name.trim())
-                            || c.macro_data.as_ref().map(|m| m.name.trim()) == Some(macro_name.trim())
-                        {
-                            c.macro_data.clone()
-                        } else {
-                            None
-                        }
-                    })
-                } else {
-                    None
-                }
-            })
-        };
-
-        if let Some(m) = target_macro {
-            println!("[+] Running macro '{}' (steps: {}, toggle: {})", m.name, m.sequence.len(), m.is_toggle);
-            if m.is_toggle {
-                let active = macro_engine::start_macro_loop(m);
-                *slot = Some((macro_name.clone(), active));
-                let weak = app_weak.clone();
-                let m_name = macro_name.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(app) = weak.upgrade() {
-                        app.set_active_macro_name(m_name.clone().into());
-                        app.set_status_msg(format!("Триггер: запущен автокликер '{}'", m_name).into());
+            match name.as_str() {
+                "__PROFILE_NEXT__" => app.invoke_next_app_profile(),
+                "__DPI_UP__" => app.invoke_dpi_up(),
+                "__DPI_DOWN__" => app.invoke_dpi_down(),
+                _ => {
+                    if let Some(data) = find_macro(&name, &custom, &settings) {
+                        toggle_macro(&app, &runtime, &listener, data, generation, true);
+                    } else {
+                        app.set_status_msg(format!("Макрос '{name}' не найден").into());
                     }
-                });
-            } else {
-                let weak = app_weak.clone();
-                let m_name = macro_name.clone();
-                thread::spawn(move || {
-                    macro_engine::play_macro_once(&m);
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(app) = weak.upgrade() {
-                            app.set_status_msg(format!("Триггер: макрос '{}' выполнен", m_name).into());
-                        }
-                    });
-                });
-            }
-        } else {
-            eprintln!("[-] Warning: macro '{}' not found in custom macros or G HUB cards", macro_name);
-            let weak = app_weak.clone();
-            let m_name = macro_name.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(app) = weak.upgrade() {
-                    app.set_status_msg(format!("Ошибка: макрос '{}' не найден", m_name).into());
                 }
-            });
-        }
+            }
+        });
     });
 
-    // Emergency Panic Stop on Esc
-    let panic_act_slot = active_macro.clone();
-    let panic_app_weak = app.as_weak();
+    // Stop on the panic worker, without waiting for the UI event loop.
+    let runtime = player.clone();
+    let weak = app.as_weak();
     listener.set_panic_callback(move || {
-        let mut slot = panic_act_slot.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((curr_name, active)) = slot.take() {
-            active.stop();
-            let weak = panic_app_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(app) = weak.upgrade() {
-                    app.set_active_macro_name("".into());
-                    app.set_status_msg(format!("⛔ Экстренная остановка (Esc): '{}' остановлен", curr_name).into());
-                }
-            });
-        }
+        let generation = runtime.stop();
+        let runtime = runtime.clone();
+        let weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if runtime.is_idle_at(generation)
+                && let Some(app) = weak.upgrade()
+            {
+                app.set_active_macro_name("".into());
+                app.set_status_msg("⛔ Экстренная остановка (Esc): макросы остановлены".into());
+            }
+        });
     });
 }
 
@@ -160,11 +140,13 @@ pub struct MacroControllerContext<'a> {
     pub custom_macros: &'a Arc<Mutex<Vec<LgMacro>>>,
     pub lghub_settings: &'a Arc<Option<LgHubSettings>>,
     pub keybinds: &'a Arc<Mutex<Vec<ButtonBinding>>>,
-    pub active_macro: &'a Arc<Mutex<Option<(String, macro_engine::ActiveMacro)>>>,
+    pub player: &'a Arc<MacroPlayer>,
+    pub profiles: &'a Arc<Mutex<Vec<AppProfile>>>,
+    pub profile_model: &'a Rc<VecModel<ProfileItem>>,
     pub listener: &'a Arc<KeybindListener>,
 }
 
-pub fn setup_macro_controller(ctx: &MacroControllerContext) {
+pub fn setup_macro_controller(ctx: &MacroControllerContext) -> slint::Timer {
     let app = ctx.app;
     let macro_model = ctx.macro_model;
     let keybind_model = ctx.keybind_model;
@@ -172,109 +154,62 @@ pub fn setup_macro_controller(ctx: &MacroControllerContext) {
     let custom_macros = ctx.custom_macros;
     let lghub_settings = ctx.lghub_settings;
     let keybinds = ctx.keybinds;
-    let active_macro = ctx.active_macro;
     let listener = ctx.listener;
-    // Stop all macros callback
-    let macro_slot = active_macro.clone();
-    let app_weak = app.as_weak();
+    let edits = MacroEditState {
+        custom: custom_macros.clone(),
+        profiles: ctx.profiles.clone(),
+        bindings: keybinds.clone(),
+        listener: listener.clone(),
+        player: ctx.player.clone(),
+        imported: lghub_settings.clone(),
+        store: crate::lghub::profile_store::ProfileStore::user(),
+        macros_path: crate::lghub::storage::get_storage_path("user_macros.json"),
+    };
+
+    let runtime = ctx.player.clone();
+    let weak = app.as_weak();
+    let listener_ref = listener.clone();
     app.on_stop_all_macros(move || {
-        let mut slot = macro_slot.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((_, active)) = slot.take() {
-            active.stop();
-        }
-        if let Some(app) = app_weak.upgrade() {
+        listener_ref.invalidate_pending_events();
+        runtime.stop();
+        if let Some(app) = weak.upgrade() {
             app.set_active_macro_name("".into());
             app.set_status_msg("Все макросы остановлены".into());
         }
     });
 
-    // Toggle macro execution callback
-    let macro_slot = active_macro.clone();
-    let settings_arc = lghub_settings.clone();
-    let custom_arc = custom_macros.clone();
-    let app_weak = app.as_weak();
+    let runtime = ctx.player.clone();
+    let custom = custom_macros.clone();
+    let settings = lghub_settings.clone();
+    let weak = app.as_weak();
+    let listener_ref = listener.clone();
     app.on_toggle_macro(move |name| {
-        let mut slot = macro_slot.lock().unwrap_or_else(|e| e.into_inner());
-
-        // Check if currently running the same macro -> stop it
-        if let Some((active_name, active)) = slot.take() {
-            active.stop();
-            if active_name == name.as_str() {
-                if let Some(app) = app_weak.upgrade() {
-                    app.set_active_macro_name("".into());
-                    app.set_status_msg(format!("Макрос '{}' остановлен", name).into());
-                }
-                return;
-            }
-        }
-
-        // Search custom macros first
-        let custom_target = if let Ok(custom) = custom_arc.lock() {
-            custom.iter().find(|m| m.name == name.as_str()).cloned()
-        } else {
-            None
-        };
-
-        if let Some(m) = custom_target {
-            if m.is_toggle {
-                let active = macro_engine::start_macro_loop(m);
-                *slot = Some((name.to_string(), active));
-                if let Some(app) = app_weak.upgrade() {
-                    app.set_active_macro_name(name.clone());
-                    app.set_status_msg(format!("Запущен автокликер '{}'", name).into());
-                }
-            } else {
-                let weak = app_weak.clone();
-                let m_name = name.clone();
-                thread::spawn(move || {
-                    macro_engine::play_macro_once(&m);
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(app) = weak.upgrade() {
-                            app.set_status_msg(format!("Макрос '{}' выполнен", m_name).into());
-                        }
-                    });
-                });
-            }
+        let generation = runtime.generation();
+        let Some(app) = weak.upgrade() else {
             return;
-        }
-
-        // Search G HUB imported macros
-        if let Some(ref data) = *settings_arc {
-            let target = data.cards.iter().find(|c| {
-                name == c.name.as_deref().unwrap_or("")
-                    || name == c.macro_data.as_ref().map(|m| m.name.as_str()).unwrap_or("")
-            });
-
-            if let Some(card) = target
-                && let Some(m) = &card.macro_data {
-                    if m.is_toggle {
-                        let active = macro_engine::start_macro_loop(m.clone());
-                        *slot = Some((name.to_string(), active));
-                        if let Some(app) = app_weak.upgrade() {
-                            app.set_active_macro_name(name.clone());
-                            app.set_status_msg(format!("Запущен автокликер '{}'", name).into());
-                        }
-                    } else {
-                        let m_clone = m.clone();
-                        let weak = app_weak.clone();
-                        let m_name = name.clone();
-                        thread::spawn(move || {
-                            macro_engine::play_macro_once(&m_clone);
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(app) = weak.upgrade() {
-                                    app.set_status_msg(format!("Макрос '{}' выполнен", m_name).into());
-                                }
-                            });
-                        });
-                    }
-                    return;
-                }
-        }
-
-        if let Some(app) = app_weak.upgrade() {
-            app.set_status_msg(format!("Макрос '{}' не найден", name).into());
+        };
+        if let Some(data) = find_macro(name.as_str(), &custom, &settings) {
+            toggle_macro(&app, &runtime, &listener_ref, data, generation, false);
+        } else {
+            app.set_status_msg(format!("Макрос '{name}' не найден").into());
         }
     });
+
+    let completion_timer = slint::Timer::default();
+    let runtime = ctx.player.clone();
+    let weak = app.as_weak();
+    completion_timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(50),
+        move || {
+            if let Some(name) = runtime.take_finished()
+                && let Some(app) = weak.upgrade()
+            {
+                app.set_active_macro_name("".into());
+                app.set_status_msg(format!("Макрос '{name}' выполнен").into());
+            }
+        },
+    );
 
     // Macro Builder in-memory sequence state
     let builder_steps: Arc<Mutex<Vec<LgMacroComponent>>> = Arc::new(Mutex::new(Vec::new()));
@@ -289,6 +224,7 @@ pub fn setup_macro_controller(ctx: &MacroControllerContext) {
                 steps.clear();
             }
             steps_model.set_vec(Vec::new());
+            app.set_builder_error("".into());
             app.set_builder_editing_original("".into());
             app.set_builder_name("Мой новый автокликер".into());
             app.set_builder_is_toggle(true);
@@ -309,17 +245,20 @@ pub fn setup_macro_controller(ctx: &MacroControllerContext) {
         };
 
         if let Some(m) = target
-            && let Ok(mut steps) = steps_ref.lock() {
-                *steps = m.sequence.clone();
-                let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-                steps_model.set_vec(slint_steps);
-                if let Some(app) = app_weak.upgrade() {
-                    app.set_builder_editing_original(m.name.clone().into());
-                    app.set_builder_name(m.name.into());
-                    app.set_builder_is_toggle(m.is_toggle);
-                    app.set_show_macro_builder(true);
-                }
+            && let Ok(mut steps) = steps_ref.lock()
+        {
+            *steps = m.sequence.clone();
+            let slint_steps: Vec<slint::SharedString> =
+                steps.iter().map(|s| format_component(s).into()).collect();
+            steps_model.set_vec(slint_steps);
+            if let Some(app) = app_weak.upgrade() {
+                app.set_builder_error("".into());
+                app.set_builder_editing_original(m.name.clone().into());
+                app.set_builder_name(m.name.into());
+                app.set_builder_is_toggle(m.is_toggle);
+                app.set_show_macro_builder(true);
             }
+        }
     });
 
     let app_weak = app.as_weak();
@@ -409,11 +348,14 @@ pub fn setup_macro_controller(ctx: &MacroControllerContext) {
     app.on_builder_move_step_up(move |idx| {
         let idx = idx as usize;
         if let Ok(mut steps) = steps_ref.lock()
-            && idx > 0 && idx < steps.len() {
-                steps.swap(idx - 1, idx);
-                let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-                steps_model.set_vec(slint_steps);
-            }
+            && idx > 0
+            && idx < steps.len()
+        {
+            steps.swap(idx - 1, idx);
+            let slint_steps: Vec<slint::SharedString> =
+                steps.iter().map(|s| format_component(s).into()).collect();
+            steps_model.set_vec(slint_steps);
+        }
     });
 
     // Builder Move Step Down
@@ -422,96 +364,122 @@ pub fn setup_macro_controller(ctx: &MacroControllerContext) {
     app.on_builder_move_step_down(move |idx| {
         let idx = idx as usize;
         if let Ok(mut steps) = steps_ref.lock()
-            && idx + 1 < steps.len() {
-                steps.swap(idx, idx + 1);
-                let slint_steps: Vec<slint::SharedString> = steps.iter().map(|s| format_component(s).into()).collect();
-                steps_model.set_vec(slint_steps);
-            }
+            && idx + 1 < steps.len()
+        {
+            steps.swap(idx, idx + 1);
+            let slint_steps: Vec<slint::SharedString> =
+                steps.iter().map(|s| format_component(s).into()).collect();
+            steps_model.set_vec(slint_steps);
+        }
     });
 
-    // Builder Save / Update Macro
+    // Save edits and every profile reference before publishing new UI state.
     let app_weak = app.as_weak();
     let steps_ref = builder_steps.clone();
     let custom_arc = custom_macros.clone();
     let settings_arc = lghub_settings.clone();
     let keybinds_arc = keybinds.clone();
-    let listener_ref = listener.clone();
     let macro_model_ref = macro_model.clone();
     let keybind_model_ref = keybind_model.clone();
+    let profile_model = ctx.profile_model.clone();
+    let save_edits = edits.clone();
     app.on_builder_save_macro(move |orig_name, name, is_toggle| {
-        let name_str = name.trim().to_string();
-        if name_str.is_empty() {
-            if let Some(app) = app_weak.upgrade() {
-                app.set_status_msg("Ошибка: укажите название макроса!".into());
-            }
+        let Some(app) = app_weak.upgrade() else {
             return;
-        }
-
+        };
+        let name_str = name.trim().to_string();
+        app.set_builder_error("".into());
         let mut steps = steps_ref.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if steps.is_empty() {
-            steps.push(LgMacroComponent { mouse_button: Some(1), mouse_down: Some(true), vk_code: None, key_down: None, delay_ms: Some(20) });
-            steps.push(LgMacroComponent { mouse_button: Some(1), mouse_down: Some(false), vk_code: None, key_down: None, delay_ms: Some(20) });
+            steps.push(LgMacroComponent {
+                mouse_button: Some(1),
+                mouse_down: Some(true),
+                vk_code: None,
+                key_down: None,
+                delay_ms: Some(20),
+            });
+            steps.push(LgMacroComponent {
+                mouse_button: Some(1),
+                mouse_down: Some(false),
+                vk_code: None,
+                key_down: None,
+                delay_ms: Some(20),
+            });
         }
 
         let new_macro = LgMacro {
             name: name_str.clone(),
-            macro_type: if is_toggle { "toggle".into() } else { "sequence".into() },
+            macro_type: if is_toggle {
+                "toggle".into()
+            } else {
+                "sequence".into()
+            },
             action_name: Some(name_str.clone()),
             is_toggle,
             sequence: steps,
         };
 
-        if let Ok(mut custom) = custom_arc.lock() {
-            let orig_str = orig_name.trim();
-            let _ = update_custom_macro(&mut custom, orig_str, new_macro);
-
-            // If macro was renamed, update any keybindings that referenced the old name
-            if !orig_str.is_empty() && orig_str != name_str
-                && let Ok(mut binds) = keybinds_arc.lock()
-                    && rename_assigned_macro(&mut binds, orig_str, &name_str) {
-                        let _ = save_bindings(&binds);
-                        listener_ref.update_bindings(binds.clone());
-                    }
-        }
-
-        update_ui_macro_list(&macro_model_ref, &settings_arc, &custom_arc);
-        update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
-        if let Some(app) = app_weak.upgrade() {
-            app.set_show_macro_builder(false);
-            app.set_status_msg(format!("Макрос '{}' успешно сохранен", name_str).into());
+        match save_edits.save(
+            orig_name.as_str(),
+            new_macro,
+            app.get_active_profile_id().as_str(),
+        ) {
+            Ok(stopped) => {
+                if stopped {
+                    app.set_active_macro_name("".into());
+                }
+                update_ui_macro_list(&macro_model_ref, &settings_arc, &custom_arc);
+                update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
+                let profiles = save_edits
+                    .profiles
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                update_ui_profile_list(
+                    &profile_model,
+                    &profiles,
+                    app.get_active_profile_id().as_str(),
+                );
+                app.set_show_macro_builder(false);
+                app.set_status_msg(format!("Макрос '{name_str}' сохранён").into());
+            }
+            Err(error) => {
+                app.set_builder_error(error.clone().into());
+                app.set_status_msg(format!("Макрос не сохранён: {error}").into());
+            }
         }
     });
 
-    // Delete Custom Macro
     let app_weak = app.as_weak();
     let custom_arc = custom_macros.clone();
     let settings_arc = lghub_settings.clone();
     let keybinds_arc = keybinds.clone();
-    let listener_ref = listener.clone();
     let macro_model_ref = macro_model.clone();
     let keybind_model_ref = keybind_model.clone();
+    let profile_model = ctx.profile_model.clone();
     app.on_delete_custom_macro(move |name| {
-        if let Ok(mut custom) = custom_arc.lock() {
-            let _ = delete_macro(&mut custom, name.as_str());
-        }
-        // Also clear any keybinds referencing this deleted macro
-        if let Ok(mut binds) = keybinds_arc.lock() {
-            let mut changed = false;
-            for b in binds.iter_mut() {
-                if b.assigned_macro == name.as_str() {
-                    b.assigned_macro = "".into();
-                    changed = true;
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        match edits.delete(name.as_str(), app.get_active_profile_id().as_str()) {
+            Ok(stopped) => {
+                if stopped {
+                    app.set_active_macro_name("".into());
                 }
+                update_ui_macro_list(&macro_model_ref, &settings_arc, &custom_arc);
+                update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
+                let profiles = edits
+                    .profiles
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                update_ui_profile_list(
+                    &profile_model,
+                    &profiles,
+                    app.get_active_profile_id().as_str(),
+                );
+                app.set_status_msg(format!("Макрос '{name}' удалён").into());
             }
-            if changed {
-                let _ = save_bindings(&binds);
-                listener_ref.update_bindings(binds.clone());
-            }
-        }
-        update_ui_macro_list(&macro_model_ref, &settings_arc, &custom_arc);
-        update_ui_keybind_list(&keybind_model_ref, &keybinds_arc);
-        if let Some(app) = app_weak.upgrade() {
-            app.set_status_msg(format!("Пользовательский макрос '{}' удален", name).into());
+            Err(error) => app.set_status_msg(format!("Макрос не удалён: {error}").into()),
         }
     });
+    completion_timer
 }

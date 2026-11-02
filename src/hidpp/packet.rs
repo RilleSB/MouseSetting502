@@ -16,9 +16,18 @@ pub struct HidppPacket {
 }
 
 impl HidppPacket {
-    pub fn new_long(device_idx: u8, feature_idx: u8, function_id: u8, software_id: u8, params: &[u8]) -> Result<Self, String> {
+    pub fn new_long(
+        device_idx: u8,
+        feature_idx: u8,
+        function_id: u8,
+        software_id: u8,
+        params: &[u8],
+    ) -> Result<Self, String> {
         if params.len() > 16 {
-            return Err(format!("HID++ long report payload cannot exceed 16 bytes (got {})", params.len()));
+            return Err(format!(
+                "HID++ long report payload cannot exceed 16 bytes (got {})",
+                params.len()
+            ));
         }
         Ok(Self {
             report_id: ReportType::Long as u8,
@@ -63,7 +72,9 @@ impl HidppPacket {
         if bytes.len() < min_len {
             return Err(format!(
                 "HID++ report 0x{:02X} is too short (got {} bytes, expected at least {})",
-                report_id, bytes.len(), min_len
+                report_id,
+                bytes.len(),
+                min_len
             ));
         }
 

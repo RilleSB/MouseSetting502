@@ -7,7 +7,11 @@ pub fn get_device_name(dev: &HidppDevice) -> Result<String, String> {
 
     // Function 0: getNameLength
     let resp = dev.call_function(feat_idx, 0x00, &[])?;
-    let len = resp.params.first().copied().ok_or("Malformed response: missing name length")? as usize;
+    let len = resp
+        .params
+        .first()
+        .copied()
+        .ok_or("Malformed response: missing name length")? as usize;
 
     let mut name_bytes = Vec::new();
     let mut offset = 0;

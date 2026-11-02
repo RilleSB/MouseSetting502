@@ -2,6 +2,11 @@ use crate::hidpp::device::HidppDevice;
 
 const FEATURE_ADJUSTABLE_DPI: u16 = 0x2201;
 
+/// Clamp before rounding, including extreme values from GUI input or the CLI.
+pub fn normalize_dpi(value: i32) -> u16 {
+    ((value.clamp(100, 25600) + 25) / 50 * 50) as u16
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DpiRange {
     pub min_dpi: u16,
@@ -24,20 +29,19 @@ pub fn set_dpi(dev: &HidppDevice, sensor_idx: u8, target_dpi: u16) -> Result<u16
     let feat_idx = dev.get_feature_index(FEATURE_ADJUSTABLE_DPI)?;
 
     // Clamp and align to step 50
-    let valid_dpi = ((target_dpi + 25) / 50 * 50).clamp(100, 25600);
+    let valid_dpi = normalize_dpi(i32::from(target_dpi));
 
     // Function 3: setSensorDpi(sensor_idx, dpi_high, dpi_low)
-    let params = [
-        sensor_idx,
-        (valid_dpi >> 8) as u8,
-        (valid_dpi & 0xFF) as u8,
-    ];
+    let params = [sensor_idx, (valid_dpi >> 8) as u8, (valid_dpi & 0xFF) as u8];
     let _resp = dev.call_function(feat_idx, 0x03, &params)?;
 
     // Verify confirmed DPI
     let confirmed = get_current_dpi(dev, sensor_idx)?;
     if confirmed != valid_dpi {
-        return Err(format!("Device confirmed DPI {}, expected {}", confirmed, valid_dpi));
+        return Err(format!(
+            "Device confirmed DPI {}, expected {}",
+            confirmed, valid_dpi
+        ));
     }
 
     Ok(confirmed)

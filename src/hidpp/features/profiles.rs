@@ -41,8 +41,13 @@ pub fn get_current_onboard_profile(dev: &impl ProfileTransport) -> Result<u8, St
 }
 
 /// Switches the active onboard profile using its 1-based memory address.
-pub fn set_current_onboard_profile(dev: &impl ProfileTransport, profile_idx: u8) -> Result<(), String> {
-    if profile_idx == 0 { return Err("Profile slots start at 1".into()); }
+pub fn set_current_onboard_profile(
+    dev: &impl ProfileTransport,
+    profile_idx: u8,
+) -> Result<(), String> {
+    if profile_idx == 0 {
+        return Err("Profile slots start at 1".into());
+    }
     dev.profile_call(3, &[0, profile_idx])?;
     Ok(())
 }
@@ -58,15 +63,23 @@ pub fn sync_all_onboard_profiles_dpi(dev: &HidppDevice, target_dpi: u16) -> Resu
 mod tests {
     use super::*;
 
-    struct Script(std::sync::Mutex<std::collections::VecDeque<(u8, Vec<u8>, Vec<u8>)>>);
+    type ExpectedCall = (u8, Vec<u8>, Vec<u8>);
+    struct Script(std::sync::Mutex<std::collections::VecDeque<ExpectedCall>>);
     impl ProfileTransport for Script {
         fn profile_call(&self, function: u8, params: &[u8]) -> Result<Vec<u8>, String> {
-            let (expected, payload, reply) = self.0.lock().unwrap().pop_front().expect("Unexpected command");
+            let (expected, payload, reply) = self
+                .0
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("Unexpected command");
             assert_eq!((function, params), (expected, payload.as_slice()));
             Ok(reply)
         }
     }
-    fn script(commands: Vec<(u8, Vec<u8>, Vec<u8>)>) -> Script { Script(std::sync::Mutex::new(commands.into())) }
+    fn script(commands: Vec<ExpectedCall>) -> Script {
+        Script(std::sync::Mutex::new(commands.into()))
+    }
 
     #[test]
     fn reads_profile_address_instead_of_mode() {

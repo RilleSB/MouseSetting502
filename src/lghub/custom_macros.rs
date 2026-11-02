@@ -1,7 +1,7 @@
+use super::db::{LgMacro, LgMacroComponent};
+use super::storage::{atomic_write_file, get_storage_path as get_appdata_storage_path};
 use std::fs;
 use std::path::{Path, PathBuf};
-use super::db::{LgMacro, LgMacroComponent};
-use super::storage::{get_storage_path as get_appdata_storage_path, atomic_write_file};
 
 const DEFAULT_MACROS_FILE: &str = "user_macros.json";
 
@@ -40,12 +40,48 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
             action_name: Some("3x Left Click Burst".into()),
             is_toggle: false,
             sequence: vec![
-                LgMacroComponent { mouse_button: Some(1), mouse_down: Some(true), vk_code: None, key_down: None, delay_ms: Some(15) },
-                LgMacroComponent { mouse_button: Some(1), mouse_down: Some(false), vk_code: None, key_down: None, delay_ms: Some(40) },
-                LgMacroComponent { mouse_button: Some(1), mouse_down: Some(true), vk_code: None, key_down: None, delay_ms: Some(15) },
-                LgMacroComponent { mouse_button: Some(1), mouse_down: Some(false), vk_code: None, key_down: None, delay_ms: Some(40) },
-                LgMacroComponent { mouse_button: Some(1), mouse_down: Some(true), vk_code: None, key_down: None, delay_ms: Some(15) },
-                LgMacroComponent { mouse_button: Some(1), mouse_down: Some(false), vk_code: None, key_down: None, delay_ms: Some(10) },
+                LgMacroComponent {
+                    mouse_button: Some(1),
+                    mouse_down: Some(true),
+                    vk_code: None,
+                    key_down: None,
+                    delay_ms: Some(15),
+                },
+                LgMacroComponent {
+                    mouse_button: Some(1),
+                    mouse_down: Some(false),
+                    vk_code: None,
+                    key_down: None,
+                    delay_ms: Some(40),
+                },
+                LgMacroComponent {
+                    mouse_button: Some(1),
+                    mouse_down: Some(true),
+                    vk_code: None,
+                    key_down: None,
+                    delay_ms: Some(15),
+                },
+                LgMacroComponent {
+                    mouse_button: Some(1),
+                    mouse_down: Some(false),
+                    vk_code: None,
+                    key_down: None,
+                    delay_ms: Some(40),
+                },
+                LgMacroComponent {
+                    mouse_button: Some(1),
+                    mouse_down: Some(true),
+                    vk_code: None,
+                    key_down: None,
+                    delay_ms: Some(15),
+                },
+                LgMacroComponent {
+                    mouse_button: Some(1),
+                    mouse_down: Some(false),
+                    vk_code: None,
+                    key_down: None,
+                    delay_ms: Some(10),
+                },
             ],
         },
         LgMacro {
@@ -55,10 +91,34 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
             is_toggle: false,
             sequence: vec![
                 // VK_SPACE = 0x20, VK_CONTROL = 0x11
-                LgMacroComponent { mouse_button: None, mouse_down: None, vk_code: Some(0x20), key_down: Some(true), delay_ms: Some(10) },
-                LgMacroComponent { mouse_button: None, mouse_down: None, vk_code: Some(0x11), key_down: Some(true), delay_ms: Some(60) },
-                LgMacroComponent { mouse_button: None, mouse_down: None, vk_code: Some(0x20), key_down: Some(false), delay_ms: Some(10) },
-                LgMacroComponent { mouse_button: None, mouse_down: None, vk_code: Some(0x11), key_down: Some(false), delay_ms: Some(10) },
+                LgMacroComponent {
+                    mouse_button: None,
+                    mouse_down: None,
+                    vk_code: Some(0x20),
+                    key_down: Some(true),
+                    delay_ms: Some(10),
+                },
+                LgMacroComponent {
+                    mouse_button: None,
+                    mouse_down: None,
+                    vk_code: Some(0x11),
+                    key_down: Some(true),
+                    delay_ms: Some(60),
+                },
+                LgMacroComponent {
+                    mouse_button: None,
+                    mouse_down: None,
+                    vk_code: Some(0x20),
+                    key_down: Some(false),
+                    delay_ms: Some(10),
+                },
+                LgMacroComponent {
+                    mouse_button: None,
+                    mouse_down: None,
+                    vk_code: Some(0x11),
+                    key_down: Some(false),
+                    delay_ms: Some(10),
+                },
             ],
         },
         LgMacro {
@@ -100,15 +160,8 @@ pub fn load_custom_macros_from_path(path: &Path) -> Vec<LgMacro> {
 
     match fs::read_to_string(path) {
         Ok(json_str) => match serde_json::from_str::<Vec<LgMacro>>(&json_str) {
-            Ok(list) => {
-                if list.is_empty() {
-                    let defaults = default_preset_macros();
-                    let _ = save_custom_macros_to_path(&defaults, path);
-                    defaults
-                } else {
-                    list
-                }
-            }
+            // An explicitly saved empty list means the user deleted all macros.
+            Ok(list) => list,
             Err(e) => {
                 eprintln!("[!] Warning: failed to parse custom macros JSON: {e}");
                 default_preset_macros()
@@ -143,12 +196,17 @@ pub fn save_or_update_macro(list: &mut Vec<LgMacro>, new_macro: LgMacro) -> Resu
 }
 
 /// Update an existing macro, replacing old_name if it was renamed
-pub fn update_custom_macro(list: &mut Vec<LgMacro>, old_name: &str, new_macro: LgMacro) -> Result<(), String> {
+pub fn update_custom_macro(
+    list: &mut Vec<LgMacro>,
+    old_name: &str,
+    new_macro: LgMacro,
+) -> Result<(), String> {
     if !old_name.is_empty()
-        && let Some(pos) = list.iter().position(|m| m.name == old_name) {
-            list[pos] = new_macro;
-            return save_custom_macros(list);
-        }
+        && let Some(pos) = list.iter().position(|m| m.name == old_name)
+    {
+        list[pos] = new_macro;
+        return save_custom_macros(list);
+    }
     save_or_update_macro(list, new_macro)
 }
 
@@ -175,13 +233,27 @@ pub fn format_component(comp: &LgMacroComponent) -> String {
             5 => "G5 (Боковая вперед)",
             _ => "Мышь",
         };
-        let action = if down { "Нажатие (Вниз)" } else { "Отпускание (Вверх)" };
-        let delay = comp.delay_ms.map(|d| format!(" [{} мс]", d)).unwrap_or_default();
+        let action = if down {
+            "Нажатие (Вниз)"
+        } else {
+            "Отпускание (Вверх)"
+        };
+        let delay = comp
+            .delay_ms
+            .map(|d| format!(" [{} мс]", d))
+            .unwrap_or_default();
         format!("🖱️ {} {}{}", btn_name, action, delay)
     } else if let (Some(vk), Some(down)) = (comp.vk_code, comp.key_down) {
         let key_name = vk_to_string(vk);
-        let action = if down { "Нажатие" } else { "Отпускание" };
-        let delay = comp.delay_ms.map(|d| format!(" [{} мс]", d)).unwrap_or_default();
+        let action = if down {
+            "Нажатие"
+        } else {
+            "Отпускание"
+        };
+        let delay = comp
+            .delay_ms
+            .map(|d| format!(" [{} мс]", d))
+            .unwrap_or_default();
         format!("⌨️ Клавиша '{}' {}{}", key_name, action, delay)
     } else if let Some(delay) = comp.delay_ms {
         format!("⏱️ Пауза {} мс", delay)
@@ -235,25 +307,25 @@ mod tests {
 
     #[test]
     fn test_save_and_load_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("ghub_test_macros_{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
-        let path = dir.join("test_macros.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_macros.json");
 
-        let initial = vec![
-            LgMacro {
-                name: "Test Macro 1".into(),
-                macro_type: "sequence".into(),
-                action_name: None,
-                is_toggle: false,
-                sequence: vec![
-                    LgMacroComponent { mouse_button: Some(1), mouse_down: Some(true), vk_code: None, key_down: None, delay_ms: Some(50) }
-                ],
-            }
-        ];
+        let initial = vec![LgMacro {
+            name: "Test Macro 1".into(),
+            macro_type: "sequence".into(),
+            action_name: None,
+            is_toggle: false,
+            sequence: vec![LgMacroComponent {
+                mouse_button: Some(1),
+                mouse_down: Some(true),
+                vk_code: None,
+                key_down: None,
+                delay_ms: Some(50),
+            }],
+        }];
 
         save_custom_macros_to_path(&initial, &path).unwrap();
         let loaded = load_custom_macros_from_path(&path);
-        let _ = fs::remove_dir_all(&dir);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].name, "Test Macro 1");
         assert_eq!(loaded[0].sequence.len(), 1);

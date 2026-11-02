@@ -30,10 +30,18 @@ pub fn enable_host_mode(dev: &HidppDevice) -> Result<(), String> {
 pub fn get_zone_count(dev: &HidppDevice) -> Result<u8, String> {
     let feat_idx = dev.get_feature_index(FEATURE_COLOR_LED_EFFECTS)?;
     let resp = dev.call_function(feat_idx, 0x00, &[])?;
-    resp.params.first().copied().ok_or("Malformed zone info response".into())
+    resp.params
+        .first()
+        .copied()
+        .ok_or("Malformed zone info response".into())
 }
 
-pub fn set_led_effect(dev: &HidppDevice, zone: LedZone, effect: LedEffect, persistent: bool) -> Result<(), String> {
+pub fn set_led_effect(
+    dev: &HidppDevice,
+    zone: LedZone,
+    effect: LedEffect,
+    persistent: bool,
+) -> Result<(), String> {
     let feat_idx = dev.get_feature_index(FEATURE_COLOR_LED_EFFECTS)?;
     let zone_idx = zone as u8;
 
@@ -66,7 +74,10 @@ pub fn set_led_effect(dev: &HidppDevice, zone: LedZone, effect: LedEffect, persi
             params[5] = (period_ms / 100).clamp(1, 255) as u8;
             params[12] = p_byte;
         }
-        LedEffect::ColorCycle { period_ms, brightness } => {
+        LedEffect::ColorCycle {
+            period_ms,
+            brightness,
+        } => {
             params[0] = zone_idx;
             params[1] = 0x03; // Effect 3: Color Cycle
             params[7] = (period_ms >> 8) as u8;

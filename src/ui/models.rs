@@ -1,9 +1,9 @@
+use slint::VecModel;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use slint::VecModel;
 
-use super::bridge::{MacroItem, KeybindItem, ProfileItem};
-use crate::lghub::{LgHubSettings, LgMacro, ButtonBinding, AppProfile};
+use super::bridge::{KeybindItem, MacroItem, ProfileItem};
+use crate::lghub::{AppProfile, ButtonBinding, LgHubSettings, LgMacro};
 
 pub fn update_ui_macro_list(
     macro_model: &Rc<VecModel<MacroItem>>,
@@ -33,15 +33,18 @@ pub fn update_ui_macro_list(
                 && !m.name.trim().is_empty()
                 && m.name != "Unnamed"
                 && !m.name.starts_with("APPLET_")
-                && !items.iter().any(|item| item.name.as_str() == m.name.as_str()) {
-                    items.push(MacroItem {
-                        name: m.name.clone().into(),
-                        macro_type: m.macro_type.clone().into(),
-                        is_toggle: m.is_toggle,
-                        steps_count: m.sequence.len() as i32,
-                        is_custom: false,
-                    });
-                }
+                && !items
+                    .iter()
+                    .any(|item| item.name.as_str() == m.name.as_str())
+            {
+                items.push(MacroItem {
+                    name: m.name.clone().into(),
+                    macro_type: m.macro_type.clone().into(),
+                    is_toggle: m.is_toggle,
+                    steps_count: m.sequence.len() as i32,
+                    is_custom: false,
+                });
+            }
         }
     }
 
@@ -66,7 +69,8 @@ pub fn update_ui_keybind_list(
                 },
                 default_action: b.default_action.clone().into(),
                 assigned_macro: b.assigned_macro.clone().into(),
-                assigned_label: crate::lghub::button_actions::action_label(&b.assigned_macro).into(),
+                assigned_label: crate::lghub::button_actions::action_label(&b.assigned_macro)
+                    .into(),
                 is_mouse: b.is_mouse_button,
             });
         }
@@ -81,8 +85,17 @@ pub fn update_ui_profile_list(
 ) {
     let mut items = Vec::new();
     for p in profiles {
-        let presets_str = p.dpi_presets.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(" / ");
-        let active_keybinds = p.keybinds.iter().filter(|b| !b.assigned_macro.trim().is_empty()).count();
+        let presets_str = p
+            .dpi_presets
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join(" / ");
+        let active_keybinds = p
+            .keybinds
+            .iter()
+            .filter(|b| !b.assigned_macro.trim().is_empty())
+            .count();
         items.push(ProfileItem {
             id: p.id.clone().into(),
             name: p.name.clone().into(),

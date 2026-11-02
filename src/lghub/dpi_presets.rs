@@ -1,8 +1,10 @@
+use super::storage::{atomic_write_file, get_storage_path as get_appdata_storage_path};
 use std::fs;
 use std::path::{Path, PathBuf};
-use super::storage::{get_storage_path as get_appdata_storage_path, atomic_write_file};
 
 const DPI_PRESETS_FILE: &str = "dpi_presets.json";
+
+pub use crate::hidpp::features::dpi::normalize_dpi;
 
 fn get_storage_path() -> PathBuf {
     get_appdata_storage_path(DPI_PRESETS_FILE)
@@ -25,12 +27,13 @@ pub fn load_dpi_presets_from_path(path: &Path) -> Vec<u16> {
 
     if let Ok(json_str) = fs::read_to_string(path)
         && let Ok(list) = serde_json::from_str::<Vec<u16>>(&json_str)
-        && !list.is_empty() {
-            let mut sorted = list;
-            sorted.sort_unstable();
-            sorted.dedup();
-            return sorted;
-        }
+        && !list.is_empty()
+    {
+        let mut sorted = list;
+        sorted.sort_unstable();
+        sorted.dedup();
+        return sorted;
+    }
 
     let def = default_dpi_presets();
     let _ = save_dpi_presets_to_path(&def, path);
@@ -51,20 +54,32 @@ pub fn save_dpi_presets_to_path(presets: &[u16], path: &Path) -> Result<(), Stri
 }
 
 pub fn add_dpi_preset(presets: &mut Vec<u16>, dpi: u16) -> Result<(), String> {
-    let clamped = ((dpi + 25) / 50 * 50).clamp(100, 25600);
+    add_dpi_preset_to_path(presets, dpi, &get_storage_path())
+}
+
+pub fn add_dpi_preset_to_path(presets: &mut Vec<u16>, dpi: u16, path: &Path) -> Result<(), String> {
+    let clamped = normalize_dpi(i32::from(dpi));
     if !presets.contains(&clamped) {
         presets.push(clamped);
         presets.sort_unstable();
         presets.dedup();
-        save_dpi_presets(presets)?;
+        save_dpi_presets_to_path(presets, path)?;
     }
     Ok(())
 }
 
 pub fn remove_dpi_preset(presets: &mut Vec<u16>, dpi: u16) -> Result<(), String> {
+    remove_dpi_preset_to_path(presets, dpi, &get_storage_path())
+}
+
+pub fn remove_dpi_preset_to_path(
+    presets: &mut Vec<u16>,
+    dpi: u16,
+    path: &Path,
+) -> Result<(), String> {
     if presets.len() > 1 {
         presets.retain(|&x| x != dpi);
-        save_dpi_presets(presets)?;
+        save_dpi_presets_to_path(presets, path)?;
     }
     Ok(())
 }
@@ -113,17 +128,33 @@ mod tests {
 
     #[test]
     fn test_add_remove_preset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DPI_PRESETS_FILE);
         let mut presets = vec![400, 800];
-        add_dpi_preset(&mut presets, 1200).unwrap();
+        add_dpi_preset_to_path(&mut presets, 1200, &path).unwrap();
         assert_eq!(presets, vec![400, 800, 1200]);
+        assert_eq!(load_dpi_presets_from_path(&path), presets);
 
-        remove_dpi_preset(&mut presets, 800).unwrap();
+        remove_dpi_preset_to_path(&mut presets, 800, &path).unwrap();
         assert_eq!(presets, vec![400, 1200]);
+        assert_eq!(load_dpi_presets_from_path(&path), presets);
 
         // Don't remove last one
-        remove_dpi_preset(&mut presets, 400).unwrap();
+        remove_dpi_preset_to_path(&mut presets, 400, &path).unwrap();
         assert_eq!(presets, vec![1200]);
-        remove_dpi_preset(&mut presets, 1200).unwrap();
+        remove_dpi_preset_to_path(&mut presets, 1200, &path).unwrap();
         assert_eq!(presets, vec![1200]);
+        assert_eq!(load_dpi_presets_from_path(&path), presets);
+    }
+
+    #[test]
+    fn extreme_preset_values_are_clamped_without_u16_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DPI_PRESETS_FILE);
+        let mut presets = vec![800];
+        add_dpi_preset_to_path(&mut presets, u16::MAX, &path).unwrap();
+        add_dpi_preset_to_path(&mut presets, 0, &path).unwrap();
+        assert_eq!(presets, vec![100, 800, 25600]);
+        assert_eq!(load_dpi_presets_from_path(&path), presets);
     }
 }
