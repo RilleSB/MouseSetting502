@@ -1,0 +1,89 @@
+import { Theme } from "theme.slint";
+
+export component HubButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    in property <bool> filled: false;
+    in property <bool> outlined: false;
+    in property <length> font-size: 13px;
+    callback clicked();
+    height: 38px;
+    min-width: 32px;
+    border-radius: 6px;
+    background: root.filled ? Theme.accent : touch.has-hover ? #303133 : transparent;
+    border-width: root.outlined ? 1px : 0px;
+    border-color: #494a4c;
+    Text { x: 0px; y: 0px; width: 100%; height: 100%; overflow: elide; visible: !root.has-icon; text: root.text; color: root.active ? Theme.accent : #eeeeee; font-size: root.font-size; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+    property <bool> has-icon: root.text == "⌖" || root.text == "⊞" || root.text == "☼" || root.text == "⚙" || root.text == "▧" || root.text == "app-logo";
+    if root.has-icon : Image {
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        width: root.text == "app-logo" ? 34px : 26px; height: self.width;
+        source: root.text == "⌖" ? @image-url("assets/icon-dpi.svg") : root.text == "⊞" ? @image-url("assets/icon-assign.svg") : root.text == "☼" ? @image-url("assets/icon-light.svg") : root.text == "⚙" ? @image-url("assets/icon-settings.svg") : root.text == "app-logo" ? @image-url("assets/app-icon.png") : @image-url("assets/icon-memory.svg");
+        colorize: root.text == "app-logo" ? transparent : root.active ? Theme.accent : white;
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+export component HubToggle inherits Rectangle {
+    in-out property <bool> checked: false;
+    callback toggled(bool);
+    width: 44px; height: 24px; border-radius: 12px;
+    background: root.checked ? Theme.accent : #626365;
+    Rectangle { x: root.checked ? 23px : 3px; y: 3px; width: 18px; height: 18px; border-radius: 9px; background: white; animate x { duration: 120ms; } }
+    TouchArea { mouse-cursor: pointer; clicked => { root.checked = !root.checked; root.toggled(root.checked); } }
+}
+
+component MapCallout inherits Rectangle {
+    in property <string> label;
+    in property <string> key;
+    in property <bool> right-side: false;
+    in property <bool> accent: false;
+    callback select(string, string);
+    width: 235px; height: 30px;
+    Text { x: 0px; y: 0px; width: 100%; height: 23px; text: root.label; color: touch.has-hover ? Theme.accent : root.accent ? #ffcc00 : #eeeeee; font-size: 14px; font-weight: 500; horizontal-alignment: root.right-side ? right : left; }
+    Rectangle { y: 24px; width: parent.width; height: 1px; background: touch.has-hover ? Theme.accent : #555557; }
+    Rectangle { x: root.right-side ? -6px : parent.width - 6px; y: 18px; width: 13px; height: 13px; border-radius: 7px; background: white; border-width: 2px; border-color: #999a9c; }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.select(root.key, root.label); } }
+}
+
+export component HubMouse inherits Rectangle {
+    in property <bool> side: false;
+    in property <bool> assignments: false;
+    in property <color> glow: #bb00ff;
+    in property <float> light-level: 1;
+    callback select(string, string);
+    background: black;
+    mouse := Image {
+        source: root.side ? @image-url("assets/mouse-side.svg") : @image-url("assets/mouse-top.svg");
+        width: root.side ? 158px : 247px;
+        height: root.side ? 410px : 456px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        image-fit: contain;
+    }
+    // The unbranded light window shares the illustration's view box.
+    Image {
+        source: root.side ? @image-url("assets/mouse-light-side.svg") : @image-url("assets/mouse-light-top.svg");
+        x: mouse.x; y: mouse.y; width: mouse.width; height: mouse.height;
+        colorize: root.glow;
+        opacity: root.light-level;
+    }
+    if root.assignments && !root.side : Rectangle {
+        x: parent.width / 2; y: parent.height / 2;
+        MapCallout { x: -325px; y: -152px; width: 302px; label: "Щелчок основной кнопкой"; key: "G1"; select(k,l) => { root.select(k,l); } }
+        MapCallout { x: 65px; y: -152px; right-side: true; label: "Щелчок другой кнопкой"; key: "G2"; select(k,l) => { root.select(k,l); } }
+        MapCallout { x: -325px; y: -114px; width: 255px; label: "Увеличить DPI"; key: "G8"; accent: true; select(k,l) => { root.select(k,l); } }
+        MapCallout { x: -325px; y: -70px; width: 310px; label: "Прокрутить влево"; key: "G10"; select(k,l) => { root.select(k,l); } }
+        MapCallout { x: 25px; y: -70px; width: 275px; right-side: true; label: "Прокрутить вправо"; key: "G11"; select(k,l) => { root.select(k,l); } }
+        MapCallout { x: -325px; y: -14px; width: 252px; label: "Уменьшить DPI"; key: "G7"; accent: true; select(k,l) => { root.select(k,l); } }
+        MapCallout { x: 20px; y: -15px; width: 280px; right-side: true; label: "G9 · Переключить профиль"; key: "G9"; select(k,l) => { root.select(k,l); } }
+        HubButton { x: -94px; y: -264px; width: 190px; height: 55px; text: "Щелчок средней\nкнопкой"; clicked => { root.select("G3", "Щелчок средней кнопкой"); } }
+        Rectangle { x: 0px; y: -209px; width: 1px; height: 162px; background: #555557; }
+    }
+    if root.assignments && root.side : Rectangle {
+        x: parent.width / 2; y: parent.height / 2;
+        MapCallout { x: -260px; y: -47px; width: 226px; label: "G6 · Переключение DPI"; key: "G6"; select(k,l) => { root.select(k,l); } }
+        MapCallout { x: -260px; y: -24px; width: 260px; label: "Вперед"; key: "G5"; select(k,l) => { root.select(k,l); } }
+        MapCallout { x: -260px; y: 37px; width: 272px; label: "Назад"; key: "G4"; select(k,l) => { root.select(k,l); } }
+    }
+}

@@ -5,6 +5,7 @@ pub enum StartupState {
     Current,
     OtherCopy,
     Occupied,
+    BlockedByWindows,
 }
 
 const VALUE_NAME: &str = "MouseSettings502";
@@ -40,12 +41,19 @@ fn classify(value: Option<&str>, current: &std::path::Path) -> Result<StartupSta
         .unwrap_or("");
     if args.trim().eq_ignore_ascii_case(STARTUP_ARGUMENT)
         && (name.eq_ignore_ascii_case("ghub_rust.exe")
-            || name.eq_ignore_ascii_case("Mouse Settings 502.exe"))
+            || name.eq_ignore_ascii_case("Mouse Settings 502.exe")
+            || name.eq_ignore_ascii_case("MouseSettings502.exe")
+            || name.eq_ignore_ascii_case("MouseSettings502-preview.exe")
+            || name.eq_ignore_ascii_case("ghub-macros-preview.exe"))
     {
         Ok(StartupState::OtherCopy)
     } else {
         Ok(StartupState::Occupied)
     }
+}
+
+fn approval_disabled(bytes: &[u8]) -> bool {
+    bytes.get(..4).is_some_and(|header| header == [3, 0, 0, 0])
 }
 
 #[cfg(windows)]
@@ -54,9 +62,9 @@ mod platform {
     use std::{ffi::OsStr, os::windows::ffi::OsStrExt, path::Path, ptr};
     use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
     use windows_sys::Win32::System::Registry::{
-        HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ,
-        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
-        RegSetValueExW,
+        HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_BINARY,
+        REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteValueW,
+        RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
     };
 
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -212,13 +220,53 @@ mod platform {
         Ok(confirmed)
     }
 
+    // Read Windows' approval without overriding the user's Task Manager setting.
+    fn blocked_at(path: &str) -> Result<bool, String> {
+        let Some(key) = open(path, false, false)? else {
+            return Ok(false);
+        };
+        let mut kind = 0;
+        let mut size = 12u32;
+        let mut bytes = [0u8; 12];
+        let code = unsafe {
+            RegQueryValueExW(
+                key.0,
+                wide(VALUE_NAME).as_ptr(),
+                ptr::null(),
+                &mut kind,
+                bytes.as_mut_ptr(),
+                &mut size,
+            )
+        };
+        if code == ERROR_FILE_NOT_FOUND {
+            return Ok(false);
+        }
+        if code != ERROR_SUCCESS {
+            return Err(error(code));
+        }
+        if kind != REG_BINARY || size < 4 {
+            return Err("Некорректная отметка Windows об автозагрузке".into());
+        }
+        Ok(super::approval_disabled(&bytes[..size as usize]))
+    }
+
     pub fn state() -> Result<StartupState, String> {
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-        state_at(RUN_KEY, &executable)
+        let state = state_at(RUN_KEY, &executable)?;
+        if matches!(state, StartupState::Current | StartupState::OtherCopy)
+            && blocked_at(
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+            )?
+        {
+            Ok(StartupState::BlockedByWindows)
+        } else {
+            Ok(state)
+        }
     }
     pub fn set(enabled: bool) -> Result<StartupState, String> {
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-        set_at(RUN_KEY, &executable, enabled)
+        set_at(RUN_KEY, &executable, enabled)?;
+        state()
     }
 
     #[cfg(test)]
@@ -289,6 +337,25 @@ pub fn set(_enabled: bool) -> Result<StartupState, String> {
 mod tests {
     use super::*;
     use std::path::Path;
+    #[test]
+    fn startup_approval_detects_windows_disabled_state() {
+        assert!(approval_disabled(&[3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]));
+        assert!(!approval_disabled(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(!approval_disabled(&[]));
+    }
+
+    #[test]
+    fn distributed_executable_is_recognized_as_another_copy() {
+        assert_eq!(
+            classify(
+                Some(r#""C:\Users\Test\Desktop\MouseSettings502.exe" --autostart"#),
+                Path::new(r"D:\Apps\MouseSettings502.exe")
+            )
+            .unwrap(),
+            StartupState::OtherCopy
+        );
+    }
+
     #[test]
     fn commands_quote_paths_and_do_not_claim_unrelated_entries() {
         let path = Path::new(r"C:\Program Files\ghub_rust.exe");

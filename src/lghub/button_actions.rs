@@ -151,7 +151,7 @@ impl ButtonActions {
                     }
                 }
             }
-        } else if down && !action.is_empty() {
+        } else if !action.is_empty() {
             result.action = Some(action);
         }
         result

@@ -5,6 +5,16 @@ use std::sync::{Arc, Mutex};
 use super::bridge::{KeybindItem, MacroItem, ProfileItem};
 use crate::lghub::{AppProfile, ButtonBinding, LgHubSettings, LgMacro};
 
+fn macro_mode_label(data: &LgMacro) -> &'static str {
+    use crate::lghub::db::MacroMode;
+    match data.mode() {
+        MacroMode::Once => "НЕ ПОВТОРЯТЬ",
+        MacroMode::WhileHeld => "ПРИ УДЕРЖАНИИ",
+        MacroMode::Toggle => "ПЕРЕКЛЮЧЕНИЕ",
+        MacroMode::Sequence => "ПОСЛЕДОВАТЕЛЬНОСТЬ",
+    }
+}
+
 pub fn update_ui_macro_list(
     macro_model: &Rc<VecModel<MacroItem>>,
     lghub_settings: &Arc<Option<LgHubSettings>>,
@@ -17,9 +27,9 @@ pub fn update_ui_macro_list(
         for m in custom.iter() {
             items.push(MacroItem {
                 name: m.name.clone().into(),
-                macro_type: m.macro_type.clone().into(),
+                macro_type: macro_mode_label(m).into(),
                 is_toggle: m.is_toggle,
-                steps_count: m.sequence.len() as i32,
+                steps_count: m.step_count() as i32,
                 is_custom: true,
             });
         }
@@ -39,9 +49,9 @@ pub fn update_ui_macro_list(
             {
                 items.push(MacroItem {
                     name: m.name.clone().into(),
-                    macro_type: m.macro_type.clone().into(),
+                    macro_type: macro_mode_label(m).into(),
                     is_toggle: m.is_toggle,
-                    steps_count: m.sequence.len() as i32,
+                    steps_count: m.step_count() as i32,
                     is_custom: false,
                 });
             }

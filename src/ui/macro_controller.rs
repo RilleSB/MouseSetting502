@@ -6,8 +6,7 @@ use super::bridge::{KeybindItem, MacroItem, MainWindow, ProfileItem};
 use super::macro_persistence::MacroEditState;
 use super::models::{update_ui_keybind_list, update_ui_macro_list, update_ui_profile_list};
 use crate::lghub::{
-    AppProfile, LgHubSettings, LgMacro, LgMacroComponent,
-    custom_macros::format_component,
+    AppProfile, LgHubSettings, LgMacro,
     keybinds::{ButtonBinding, KeybindListener},
     macro_engine::{MacroPlayer, PlaybackChange},
 };
@@ -57,7 +56,7 @@ fn toggle_macro(
             app.set_active_macro_name("".into());
             app.set_status_msg(format!("Макрос '{name}' остановлен").into());
         }
-        PlaybackChange::Stale => {}
+        PlaybackChange::Stale | PlaybackChange::Released => {}
     }
 }
 
@@ -73,7 +72,7 @@ pub fn setup_macro_triggers(
     let runtime = player.clone();
     let custom = custom.clone();
     let settings = settings.clone();
-    listener.set_event_callback(move |name, event_generation| {
+    listener.set_transition_callback(move |name, event_generation, down, source| {
         let Some(listener) = listener_weak.upgrade() else {
             return;
         };
@@ -99,13 +98,29 @@ pub fn setup_macro_triggers(
             let Some(app) = weak.upgrade() else {
                 return;
             };
+            if !down {
+                runtime.release(&source, generation);
+                return;
+            }
             match name.as_str() {
                 "__PROFILE_NEXT__" => app.invoke_next_app_profile(),
                 "__DPI_UP__" => app.invoke_dpi_up(),
                 "__DPI_DOWN__" => app.invoke_dpi_down(),
                 _ => {
                     if let Some(data) = find_macro(&name, &custom, &settings) {
-                        toggle_macro(&app, &runtime, &listener, data, generation, true);
+                        let macro_name = data.name.clone();
+                        match runtime.press(data, generation, source) {
+                            PlaybackChange::Started => {
+                                app.set_active_macro_name(macro_name.into());
+                                app.set_status_msg("Макрос запущен".into());
+                            }
+                            PlaybackChange::Stopped => {
+                                listener.invalidate_pending_events();
+                                app.set_active_macro_name("".into());
+                                app.set_status_msg("Макрос остановлен".into());
+                            }
+                            PlaybackChange::Stale | PlaybackChange::Released => {}
+                        }
                     } else {
                         app.set_status_msg(format!("Макрос '{name}' не найден").into());
                     }
@@ -127,6 +142,21 @@ pub fn setup_macro_triggers(
             {
                 app.set_active_macro_name("".into());
                 app.set_status_msg("⛔ Экстренная остановка (Esc): макросы остановлены".into());
+            }
+        });
+    });
+
+    let runtime = player.clone();
+    let weak = app.as_weak();
+    listener.set_context_cancel(move || {
+        let generation = runtime.stop();
+        let runtime = runtime.clone();
+        let weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if runtime.is_idle_at(generation)
+                && let Some(app) = weak.upgrade()
+            {
+                app.set_active_macro_name("".into());
             }
         });
     });
@@ -211,171 +241,17 @@ pub fn setup_macro_controller(ctx: &MacroControllerContext) -> slint::Timer {
         },
     );
 
-    // Macro Builder in-memory sequence state
-    let builder_steps: Arc<Mutex<Vec<LgMacroComponent>>> = Arc::new(Mutex::new(Vec::new()));
-
-    // Open builder for new macro
-    let app_weak = app.as_weak();
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    app.on_open_macro_builder(move || {
-        if let Some(app) = app_weak.upgrade() {
-            if let Ok(mut steps) = steps_ref.lock() {
-                steps.clear();
-            }
-            steps_model.set_vec(Vec::new());
-            app.set_builder_error("".into());
-            app.set_builder_editing_original("".into());
-            app.set_builder_name("Мой новый автокликер".into());
-            app.set_builder_is_toggle(true);
-            app.set_show_macro_builder(true);
-        }
-    });
-
-    // Edit existing custom macro
-    let app_weak = app.as_weak();
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    let custom_arc = custom_macros.clone();
-    app.on_edit_custom_macro(move |name| {
-        let target = if let Ok(custom) = custom_arc.lock() {
-            custom.iter().find(|m| m.name == name.as_str()).cloned()
-        } else {
-            None
-        };
-
-        if let Some(m) = target
-            && let Ok(mut steps) = steps_ref.lock()
-        {
-            *steps = m.sequence.clone();
-            let slint_steps: Vec<slint::SharedString> =
-                steps.iter().map(|s| format_component(s).into()).collect();
-            steps_model.set_vec(slint_steps);
-            if let Some(app) = app_weak.upgrade() {
-                app.set_builder_error("".into());
-                app.set_builder_editing_original(m.name.clone().into());
-                app.set_builder_name(m.name.into());
-                app.set_builder_is_toggle(m.is_toggle);
-                app.set_show_macro_builder(true);
-            }
-        }
-    });
-
-    let app_weak = app.as_weak();
-    app.on_close_macro_builder(move || {
-        if let Some(app) = app_weak.upgrade() {
-            app.set_show_macro_builder(false);
-        }
-    });
-
-    // Builder Add Mouse
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    app.on_builder_add_mouse(move |button, down, delay| {
-        let comp = LgMacroComponent {
-            mouse_button: Some(button as u8),
-            mouse_down: Some(down),
-            vk_code: None,
-            key_down: None,
-            delay_ms: if delay > 0 { Some(delay as u64) } else { None },
-        };
-        if let Ok(mut steps) = steps_ref.lock() {
-            steps_model.push(format_component(&comp).into());
-            steps.push(comp);
-        }
-    });
-
-    // Builder Add Key
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    app.on_builder_add_key(move |vk, down, delay| {
-        let comp = LgMacroComponent {
-            mouse_button: None,
-            mouse_down: None,
-            vk_code: Some(vk as u16),
-            key_down: Some(down),
-            delay_ms: if delay > 0 { Some(delay as u64) } else { None },
-        };
-        if let Ok(mut steps) = steps_ref.lock() {
-            steps_model.push(format_component(&comp).into());
-            steps.push(comp);
-        }
-    });
-
-    // Builder Add Delay
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    app.on_builder_add_delay(move |delay| {
-        let comp = LgMacroComponent {
-            mouse_button: None,
-            mouse_down: None,
-            vk_code: None,
-            key_down: None,
-            delay_ms: Some(delay as u64),
-        };
-        if let Ok(mut steps) = steps_ref.lock() {
-            steps_model.push(format_component(&comp).into());
-            steps.push(comp);
-        }
-    });
-
-    // Builder Clear
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    app.on_builder_clear_steps(move || {
-        if let Ok(mut steps) = steps_ref.lock() {
-            steps.clear();
-        }
-        steps_model.set_vec(Vec::new());
-    });
-
-    // Builder Remove Single Step
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    app.on_builder_remove_step(move |idx| {
-        if let Ok(mut steps) = steps_ref.lock() {
-            let i = idx as usize;
-            if i < steps.len() {
-                steps.remove(i);
-                steps_model.remove(i);
-            }
-        }
-    });
-
-    // Builder Move Step Up
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    app.on_builder_move_step_up(move |idx| {
-        let idx = idx as usize;
-        if let Ok(mut steps) = steps_ref.lock()
-            && idx > 0
-            && idx < steps.len()
-        {
-            steps.swap(idx - 1, idx);
-            let slint_steps: Vec<slint::SharedString> =
-                steps.iter().map(|s| format_component(s).into()).collect();
-            steps_model.set_vec(slint_steps);
-        }
-    });
-
-    // Builder Move Step Down
-    let steps_ref = builder_steps.clone();
-    let steps_model = builder_steps_model.clone();
-    app.on_builder_move_step_down(move |idx| {
-        let idx = idx as usize;
-        if let Ok(mut steps) = steps_ref.lock()
-            && idx + 1 < steps.len()
-        {
-            steps.swap(idx, idx + 1);
-            let slint_steps: Vec<slint::SharedString> =
-                steps.iter().map(|s| format_component(s).into()).collect();
-            steps_model.set_vec(slint_steps);
-        }
-    });
+    let builder = super::macro_draft::setup(
+        app,
+        builder_steps_model.clone(),
+        custom_macros.clone(),
+        lghub_settings.clone(),
+        listener.clone(),
+        ctx.player.clone(),
+    );
 
     // Save edits and every profile reference before publishing new UI state.
     let app_weak = app.as_weak();
-    let steps_ref = builder_steps.clone();
     let custom_arc = custom_macros.clone();
     let settings_arc = lghub_settings.clone();
     let keybinds_arc = keybinds.clone();
@@ -383,40 +259,18 @@ pub fn setup_macro_controller(ctx: &MacroControllerContext) -> slint::Timer {
     let keybind_model_ref = keybind_model.clone();
     let profile_model = ctx.profile_model.clone();
     let save_edits = edits.clone();
-    app.on_builder_save_macro(move |orig_name, name, is_toggle| {
+    app.on_builder_save_macro(move |orig_name, name, _is_toggle| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
         let name_str = name.trim().to_string();
         app.set_builder_error("".into());
-        let mut steps = steps_ref.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        if steps.is_empty() {
-            steps.push(LgMacroComponent {
-                mouse_button: Some(1),
-                mouse_down: Some(true),
-                vk_code: None,
-                key_down: None,
-                delay_ms: Some(20),
-            });
-            steps.push(LgMacroComponent {
-                mouse_button: Some(1),
-                mouse_down: Some(false),
-                vk_code: None,
-                key_down: None,
-                delay_ms: Some(20),
-            });
-        }
-
-        let new_macro = LgMacro {
-            name: name_str.clone(),
-            macro_type: if is_toggle {
-                "toggle".into()
-            } else {
-                "sequence".into()
-            },
-            action_name: Some(name_str.clone()),
-            is_toggle,
-            sequence: steps,
+        let new_macro = match builder.build(&app, &name_str) {
+            Ok(data) => data,
+            Err(error) => {
+                app.set_builder_error(error.into());
+                return;
+            }
         };
 
         match save_edits.save(
@@ -439,7 +293,7 @@ pub fn setup_macro_controller(ctx: &MacroControllerContext) -> slint::Timer {
                     &profiles,
                     app.get_active_profile_id().as_str(),
                 );
-                app.set_show_macro_builder(false);
+                app.invoke_close_macro_builder();
                 app.set_status_msg(format!("Макрос '{name_str}' сохранён").into());
             }
             Err(error) => {

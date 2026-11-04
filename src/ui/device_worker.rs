@@ -20,10 +20,10 @@ pub const G435_PID: u16 = 0x0ACB;
 pub(super) enum DeviceCommand {
     SetDpi(DpiRequest),
     SetReportRate(u8),
-    SetRgbStatic(u8, u8, u8),
-    SetRgbCycle,
-    SetRgbBreathe(u8, u8, u8),
-    SetRgbOff,
+    SetLighting {
+        zone: Option<crate::hidpp::features::LedZone>,
+        effect: crate::hidpp::features::LedEffect,
+    },
     SetMemoryMode(bool),
     Refresh,
     SyncAllOnboardSlots(u16),
@@ -256,24 +256,64 @@ pub fn init_device_worker(
         }
     });
 
+    let lighting_timer = Rc::new(slint::Timer::default());
+    let weak = app.as_weak();
     let tx = cmd_tx.clone();
-    app.on_set_rgb_static(move |r, g, b| {
-        let _ = tx.send(DeviceCommand::SetRgbStatic(r as u8, g as u8, b as u8));
-    });
-
-    let tx = cmd_tx.clone();
-    app.on_set_rgb_cycle(move || {
-        let _ = tx.send(DeviceCommand::SetRgbCycle);
-    });
-
-    let tx = cmd_tx.clone();
-    app.on_set_rgb_breathe(move |r, g, b| {
-        let _ = tx.send(DeviceCommand::SetRgbBreathe(r as u8, g as u8, b as u8));
-    });
-
-    let tx = cmd_tx.clone();
-    app.on_set_rgb_off(move || {
-        let _ = tx.send(DeviceCommand::SetRgbOff);
+    app.on_apply_lighting(move |sync| {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        use crate::hidpp::features::{LedEffect, LedZone};
+        let percent = app.get_effect_brightness().round().clamp(1.0, 100.0) as u8;
+        let period_ms = (app.get_effect_speed() * 1000.0)
+            .round()
+            .clamp(1000.0, 20000.0) as u16;
+        let r = app.get_lighting_r().clamp(0, 255) as u8;
+        let g = app.get_lighting_g().clamp(0, 255) as u8;
+        let b = app.get_lighting_b().clamp(0, 255) as u8;
+        let scale = |value: u8| ((u16::from(value) * u16::from(percent) + 50) / 100) as u8;
+        let effect = match app.get_lighting_effect() {
+            0 => LedEffect::ColorCycle {
+                period_ms,
+                brightness: percent,
+            },
+            1 => LedEffect::Static {
+                r: scale(r),
+                g: scale(g),
+                b: scale(b),
+            },
+            2 => LedEffect::Breathing {
+                r,
+                g,
+                b,
+                period_ms,
+                brightness: percent,
+            },
+            _ => LedEffect::Off,
+        };
+        let zone = if sync {
+            None
+        } else if app.get_lighting_zone() == 0 {
+            Some(LedZone::DpiLeds)
+        } else {
+            Some(LedZone::Logo)
+        };
+        let tx = tx.clone();
+        let weak = weak.clone();
+        // Coalesce slider changes rather than queueing hundreds of HID requests.
+        lighting_timer.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_millis(100),
+            move || {
+                if tx
+                    .send(DeviceCommand::SetLighting { zone, effect })
+                    .is_err()
+                    && let Some(app) = weak.upgrade()
+                {
+                    app.set_status_msg("Обработчик устройства остановлен".into());
+                }
+            },
+        );
     });
 
     // Callbacks for G9 & Onboard Memory

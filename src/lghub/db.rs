@@ -21,6 +21,13 @@ pub struct LgMacroComponent {
     pub vk_code: Option<u16>,
     pub key_down: Option<bool>,
     pub delay_ms: Option<u64>,
+    /// Manual pauses survive the standard-delay override; recorded pauses do not.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub explicit_delay: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +37,50 @@ pub struct LgMacro {
     pub action_name: Option<String>,
     pub is_toggle: bool,
     pub sequence: Vec<LgMacroComponent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback: Option<MacroPlayback>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MacroMode {
+    Once,
+    WhileHeld,
+    Toggle,
+    Sequence,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MacroPlayback {
+    pub mode: MacroMode,
+    #[serde(default)]
+    pub on_press: Vec<LgMacroComponent>,
+    #[serde(default)]
+    pub on_release: Vec<LgMacroComponent>,
+    /// None preserves recorded/per-event timing, including legacy files.
+    #[serde(default)]
+    pub standard_delay_ms: Option<u64>,
+}
+
+impl LgMacro {
+    pub fn step_count(&self) -> usize {
+        self.sequence.len()
+            + self
+                .playback
+                .as_ref()
+                .map(|p| p.on_press.len() + p.on_release.len())
+                .unwrap_or(0)
+    }
+    pub fn mode(&self) -> MacroMode {
+        self.playback
+            .as_ref()
+            .map(|p| p.mode)
+            .unwrap_or(if self.is_toggle {
+                MacroMode::Toggle
+            } else {
+                MacroMode::Once
+            })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +219,7 @@ impl LgHubSettings {
                         for &mod_hid in &modifiers {
                             if let Some(vk) = hid_usage_to_vk(mod_hid) {
                                 components.push(LgMacroComponent {
+                                    explicit_delay: false,
                                     mouse_button: None,
                                     mouse_down: None,
                                     vk_code: Some(vk),
@@ -182,6 +234,7 @@ impl LgHubSettings {
                             && let Some(vk) = hid_usage_to_vk(code)
                         {
                             components.push(LgMacroComponent {
+                                explicit_delay: false,
                                 mouse_button: None,
                                 mouse_down: None,
                                 vk_code: Some(vk),
@@ -189,6 +242,7 @@ impl LgHubSettings {
                                 delay_ms: Some(10),
                             });
                             components.push(LgMacroComponent {
+                                explicit_delay: false,
                                 mouse_button: None,
                                 mouse_down: None,
                                 vk_code: Some(vk),
@@ -201,6 +255,7 @@ impl LgHubSettings {
                         for &mod_hid in modifiers.iter().rev() {
                             if let Some(vk) = hid_usage_to_vk(mod_hid) {
                                 components.push(LgMacroComponent {
+                                    explicit_delay: false,
                                     mouse_button: None,
                                     mouse_down: None,
                                     vk_code: Some(vk),
@@ -212,6 +267,7 @@ impl LgHubSettings {
                     }
 
                     macro_data = Some(LgMacro {
+                        playback: None,
                         name: m_name,
                         macro_type: m_type,
                         action_name,
@@ -299,6 +355,7 @@ fn parse_component(comp: &serde_json::Value, out: &mut Vec<LgMacroComponent>) {
 
             let is_down = btn.get("isDown").and_then(|v| v.as_bool()).unwrap_or(false);
             out.push(LgMacroComponent {
+                explicit_delay: false,
                 mouse_button: Some(hid_usage),
                 mouse_down: Some(is_down),
                 vk_code: None,
@@ -322,6 +379,7 @@ fn parse_component(comp: &serde_json::Value, out: &mut Vec<LgMacroComponent>) {
         {
             let is_down = kb.get("isDown").and_then(|v| v.as_bool()).unwrap_or(false);
             out.push(LgMacroComponent {
+                explicit_delay: false,
                 mouse_button: None,
                 mouse_down: None,
                 vk_code: Some(vk),
@@ -337,6 +395,7 @@ fn parse_component(comp: &serde_json::Value, out: &mut Vec<LgMacroComponent>) {
             .and_then(|v| v.as_u64())
             .unwrap_or(1);
         out.push(LgMacroComponent {
+            explicit_delay: false,
             mouse_button: None,
             mouse_down: None,
             vk_code: None,

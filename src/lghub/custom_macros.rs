@@ -13,12 +13,14 @@ fn get_storage_path() -> PathBuf {
 pub fn default_preset_macros() -> Vec<LgMacro> {
     vec![
         LgMacro {
+            playback: None,
             name: "⚡ Быстрый клик ЛКМ (Toggle)".into(),
             macro_type: "toggle".into(),
             action_name: Some("Auto-Clicker Left Button".into()),
             is_toggle: true,
             sequence: vec![
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(1),
                     mouse_down: Some(true),
                     vk_code: None,
@@ -26,6 +28,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(15),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(1),
                     mouse_down: Some(false),
                     vk_code: None,
@@ -35,12 +38,14 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
             ],
         },
         LgMacro {
+            playback: None,
             name: "🎯 Тройной выстрел (Burst 3x)".into(),
             macro_type: "sequence".into(),
             action_name: Some("3x Left Click Burst".into()),
             is_toggle: false,
             sequence: vec![
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(1),
                     mouse_down: Some(true),
                     vk_code: None,
@@ -48,6 +53,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(15),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(1),
                     mouse_down: Some(false),
                     vk_code: None,
@@ -55,6 +61,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(40),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(1),
                     mouse_down: Some(true),
                     vk_code: None,
@@ -62,6 +69,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(15),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(1),
                     mouse_down: Some(false),
                     vk_code: None,
@@ -69,6 +77,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(40),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(1),
                     mouse_down: Some(true),
                     vk_code: None,
@@ -76,6 +85,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(15),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(1),
                     mouse_down: Some(false),
                     vk_code: None,
@@ -85,6 +95,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
             ],
         },
         LgMacro {
+            playback: None,
             name: "🚀 Прыжок с приседанием (Crouch Jump)".into(),
             macro_type: "sequence".into(),
             action_name: Some("Space + Ctrl Jump".into()),
@@ -92,6 +103,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
             sequence: vec![
                 // VK_SPACE = 0x20, VK_CONTROL = 0x11
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: None,
                     mouse_down: None,
                     vk_code: Some(0x20),
@@ -99,6 +111,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(10),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: None,
                     mouse_down: None,
                     vk_code: Some(0x11),
@@ -106,6 +119,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(60),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: None,
                     mouse_down: None,
                     vk_code: Some(0x20),
@@ -113,6 +127,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(10),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: None,
                     mouse_down: None,
                     vk_code: Some(0x11),
@@ -122,12 +137,14 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
             ],
         },
         LgMacro {
+            playback: None,
             name: "🔄 Спам ПКМ (Toggle)".into(),
             macro_type: "toggle".into(),
             action_name: Some("Auto-Clicker Right Button".into()),
             is_toggle: true,
             sequence: vec![
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(2),
                     mouse_down: Some(true),
                     vk_code: None,
@@ -135,6 +152,7 @@ pub fn default_preset_macros() -> Vec<LgMacro> {
                     delay_ms: Some(25),
                 },
                 LgMacroComponent {
+                    explicit_delay: false,
                     mouse_button: Some(2),
                     mouse_down: Some(false),
                     vk_code: None,
@@ -273,6 +291,12 @@ pub fn vk_to_string(vk: u16) -> String {
         0x08 => "Backspace".into(),
         0x09 => "Tab".into(),
         0x0D => "Enter".into(),
+        0xa0 => "Left Shift".into(),
+        0xa1 => "Right Shift".into(),
+        0xa2 => "Left Ctrl".into(),
+        0xa3 => "Right Ctrl".into(),
+        0xa4 => "Left Alt".into(),
+        0xa5 => "Right Alt".into(),
         0x10 => "Shift".into(),
         0x11 => "Ctrl".into(),
         0x12 => "Alt".into(),
@@ -298,6 +322,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_json_keeps_once_and_toggle_modes_without_migration() {
+        let json = r#"[{"name":"old","macro_type":"sequence","action_name":null,"is_toggle":false,"sequence":[{"mouse_button":1,"mouse_down":true,"vk_code":null,"key_down":null,"delay_ms":1}]}]"#;
+        let mut macros: Vec<LgMacro> = serde_json::from_str(json).unwrap();
+        assert_eq!(macros[0].mode(), super::super::db::MacroMode::Once);
+        assert!(macros[0].playback.is_none());
+        assert_eq!(macros[0].sequence[0].delay_ms, Some(1));
+        macros[0].is_toggle = true;
+        assert_eq!(macros[0].mode(), super::super::db::MacroMode::Toggle);
+    }
+
+    #[test]
+    fn phased_macro_roundtrip_preserves_modes_delays_and_both_edges() {
+        use super::super::db::{MacroMode, MacroPlayback};
+        let mut data = default_preset_macros().remove(0);
+        data.playback = Some(MacroPlayback {
+            mode: MacroMode::Sequence,
+            on_press: data.sequence.clone(),
+            on_release: data.sequence.clone(),
+            standard_delay_ms: Some(50),
+        });
+        data.sequence[0].explicit_delay = true;
+        let loaded: LgMacro = serde_json::from_str(&serde_json::to_string(&data).unwrap()).unwrap();
+        assert_eq!(loaded.mode(), MacroMode::Sequence);
+        assert!(loaded.sequence[0].explicit_delay);
+        let spec = loaded.playback.unwrap();
+        assert_eq!(spec.standard_delay_ms, Some(50));
+        assert_eq!(spec.on_press[0].mouse_down, Some(true));
+        assert_eq!(spec.on_release[1].mouse_down, Some(false));
+    }
+
+    #[test]
     fn test_default_presets() {
         let presets = default_preset_macros();
         assert!(presets.len() >= 3);
@@ -311,11 +366,13 @@ mod tests {
         let path = dir.path().join("test_macros.json");
 
         let initial = vec![LgMacro {
+            playback: None,
             name: "Test Macro 1".into(),
             macro_type: "sequence".into(),
             action_name: None,
             is_toggle: false,
             sequence: vec![LgMacroComponent {
+                explicit_delay: false,
                 mouse_button: Some(1),
                 mouse_down: Some(true),
                 vk_code: None,
@@ -338,6 +395,7 @@ mod tests {
         let original_len = list.len();
 
         let new_m = LgMacro {
+            playback: None,
             name: "Super Jump".into(),
             macro_type: "sequence".into(),
             action_name: None,
@@ -361,6 +419,7 @@ mod tests {
     #[test]
     fn test_format_component() {
         let c1 = LgMacroComponent {
+            explicit_delay: false,
             mouse_button: Some(1),
             mouse_down: Some(true),
             vk_code: None,
@@ -372,6 +431,7 @@ mod tests {
         assert!(s1.contains("25 мс"));
 
         let c2 = LgMacroComponent {
+            explicit_delay: false,
             mouse_button: None,
             mouse_down: None,
             vk_code: Some(0x20),
@@ -382,6 +442,7 @@ mod tests {
         assert!(s2.contains("Пробел"));
 
         let c3 = LgMacroComponent {
+            explicit_delay: false,
             mouse_button: None,
             mouse_down: None,
             vk_code: None,
@@ -400,6 +461,7 @@ mod tests {
         let mut updated = list[0].clone();
         updated.name = "Renamed Macro".into();
         updated.sequence.push(LgMacroComponent {
+            explicit_delay: false,
             mouse_button: Some(2),
             mouse_down: Some(true),
             vk_code: None,

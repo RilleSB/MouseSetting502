@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="247" height="456" viewBox="0 0 247 456">
+  <title>Original eleven-button gaming mouse — top view</title>
+  <defs>
+    <linearGradient id="cable" x1="0" x2="1"><stop stop-color="#08090a"/><stop offset=".45" stop-color="#33373a"/><stop offset="1" stop-color="#090b0d"/></linearGradient>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2=".8"><stop stop-color="#53585d"/><stop offset=".4" stop-color="#292d31"/><stop offset=".75" stop-color="#1b1e22"/><stop offset="1" stop-color="#0c0f12"/></linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#555b60"/><stop offset=".55" stop-color="#353a3f"/><stop offset="1" stop-color="#1d2226"/></linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#42484e"/><stop offset="1" stop-color="#20252a"/></linearGradient>
+    <linearGradient id="palm" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#42484e"/><stop offset=".45" stop-color="#292e33"/><stop offset="1" stop-color="#171c20"/></linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#111518"/><stop offset=".55" stop-color="#30363b"/><stop offset="1" stop-color="#101417"/></linearGradient>
+    <linearGradient id="wheel" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#151a1e"/><stop offset=".25" stop-color="#727b82"/><stop offset=".52" stop-color="#a0a7ac"/><stop offset=".8" stop-color="#535d65"/><stop offset="1" stop-color="#151a1e"/></linearGradient>
+    <linearGradient id="button" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#50585f"/><stop offset="1" stop-color="#252c32"/></linearGradient>
+    <pattern id="grip" width="9" height="12" patternUnits="userSpaceOnUse"><path d="m1 0 5 5-5 5" fill="none" stroke="#555d64" stroke-opacity=".25" stroke-width="1"/></pattern>
+  </defs>
+  <!-- Independently drawn geometry, with no manufacturer logo or photo texture. -->
+  <path d="M123 0v49" stroke="#080b0d" stroke-width="10"/>
+  <path d="M123 0v49" stroke="url(#cable)" stroke-width="6"/>
+  <path d="M117 39h12l3 29h-18Z" fill="#12171b" stroke="#30373c"/>
+  <path d="M117 47h12m-12 6h13m-14 6h15" stroke="#3a4248" stroke-width="2"/>
+  <!-- Thumb shelf, undercarriage and perimeter rim. -->
+  <path d="M52 204 33 226 20 282q-8 35 12 61l36 32 20-49Z" fill="url(#edge)" stroke="#3a4147"/>
+  <path d="M31 280q-8 34 5 52l27 25-12-74Z" fill="#13191d"/>
+  <path d="M58 103Q75 63 117 61q45-5 72 37 25 40 29 129l6 97q4 54-21 87-25 33-74 34-48 0-75-32-28-33-26-80l9-108q3-78 21-122Z" fill="#090d10" stroke="#444d54" stroke-width="1.5"/>
+  <path d="M62 106Q80 69 117 67q44-3 68 34 24 38 27 127l7 97q3 51-21 81-23 30-69 32-44 0-69-30-25-29-23-74l8-108q4-79 17-120Z" fill="url(#shell)"/>
+  <!-- Primary switches are separate shell plates. -->
+  <path d="M63 108Q83 73 115 70l-2 104-3 70-55 24-8-46q5-79 16-114Z" fill="url(#left)" stroke="#171d22" stroke-width="1.5"/>
+  <path d="m135 70 18 6q35 16 47 73l9 115-63-21-10-69Z" fill="url(#right)" stroke="#11171c" stroke-width="1.5"/>
+  <path d="M65 111q14-26 40-33M161 85q26 18 36 65" fill="none" stroke="#7e878e" stroke-opacity=".3"/>
+  <path d="m113 80-3 157m26-157 10 157" stroke="#090e12" stroke-width="2"/>
+  <!-- Recessed center spine, wheel, tilt detents and two auxiliary switches. -->
+  <path d="m116 99 17 1 8 151-34 5Z" fill="#10161b" stroke="#4a535b" stroke-width=".7"/>
+  <rect x="113" y="110" width="24" height="69" rx="9" fill="#080d11" stroke="#59636c"/>
+  <rect x="117" y="116" width="16" height="56" rx="5" fill="url(#wheel)"/>
+  <path d="M119 122h12m-12 6h12m-12 6h12m-12 6h12m-12 6h12m-12 6h12m-12 6h12m-12 6h12" stroke="#252e35" stroke-width="2"/>
+  <path d="m104 137-4 5 4 5m38-10 4 5-4 5" fill="none" stroke="#7d878e" stroke-width="1.5"/>
+  <path d="m115 190 22-1 1 20-24 2Z" fill="url(#button)" stroke="#070c10" stroke-width="2"/>
+  <path d="M122 200h9m-5-4v8" stroke="#99a4ac" stroke-width="1"/>
+  <path d="m114 220 25-1 2 25-28 7Z" fill="url(#button)" stroke="#070c10" stroke-width="2"/>
+  <path d="m122 233 9-1" stroke="#99a4ac" stroke-width="1.2"/>
+  <!-- DPI shoulder switches. -->
+  <path d="m57 121 13-12-4 34-15 13Z" fill="url(#button)" stroke="#0c1115" stroke-width="1.5"/>
+  <path d="m50 164 15-14-4 32-16 16Z" fill="url(#button)" stroke="#0c1115" stroke-width="1.5"/>
+  <path d="m58 132 5-5m-12 49 5-5" stroke="#a3acb4" stroke-width="1"/>
+  <!-- Sculpted side grip and two thumb switches. -->
+  <path d="m44 203 12 65 28 17-18 77-26-30-4-48Z" fill="#1c242a" stroke="#4d5861" stroke-width=".8"/>
+  <path d="m44 238 21 50-9 56-16-17-2-43Z" fill="url(#grip)"/>
+  <path d="m46 211 7 17 13 28-8 7-17-40Z" fill="url(#button)" stroke="#0a1015" stroke-width="2"/>
+  <path d="m58 266 13 10 4 22-13-8Z" fill="url(#button)" stroke="#0a1015" stroke-width="2"/>
+  <!-- Palm cap: intentionally smooth and asymmetric, rather than a traced G502 shell. -->
+  <path d="m57 276 55-20 32-6 65 23 6 56q3 48-19 77-21 27-66 28-42 0-65-28-22-28-20-63Z" fill="url(#palm)" stroke="#11181d" stroke-width="1.5"/>
+  <path d="m62 280 50-18 32-5 60 22" fill="none" stroke="#7c8790" stroke-opacity=".35"/>
+  <path d="M208 293q10 88-25 117" fill="none" stroke="#87939d" stroke-opacity=".14" stroke-width="2"/>
+  <!-- Unbranded RGB window; its colored layer lives in mouse-light-top.svg. -->
+  <path d="m101 308 33 3-6 32-33-3Z" fill="#0b1116" stroke="#58636b" stroke-opacity=".5"/>
+  <path d="M80 397q19 23 49 25 34 0 55-23" fill="none" stroke="#67747e" stroke-opacity=".16"/>
+  <path d="m119 435 2 9h14l3-9" fill="#0b1014" stroke="#414c54" stroke-width=".7"/>
+</svg>

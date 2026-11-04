@@ -4,7 +4,7 @@ use super::{
     device_connection::{DeviceConnection, refresh_report_rate, update_ui},
     device_worker::DeviceCommand,
 };
-use crate::hidpp::features::{LedEffect, LedZone, set_dpi, set_led_effect, turn_off_all_leds};
+use crate::hidpp::features::{LedEffect, LedZone, set_dpi, set_led_effect};
 use crate::lghub::{AppProfile, KeybindListener};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{
@@ -185,44 +185,37 @@ fn execute(
             refresh_report_rate(&device.dev, weak);
             result
         }
-        DeviceCommand::SetRgbStatic(r, g, b) => {
-            set_led_effect(
-                &device.dev,
-                LedZone::Logo,
-                LedEffect::Static { r, g, b },
-                false,
-            )?;
-            Ok(format!("Цвет установлен: RGB({r}, {g}, {b})"))
-        }
-        DeviceCommand::SetRgbCycle => {
-            set_led_effect(
-                &device.dev,
-                LedZone::Logo,
-                LedEffect::ColorCycle {
-                    period_ms: 10000,
-                    brightness: 255,
-                },
-                false,
-            )?;
-            Ok("Включён спектральный цикл".into())
-        }
-        DeviceCommand::SetRgbBreathe(r, g, b) => {
-            set_led_effect(
-                &device.dev,
-                LedZone::Logo,
-                LedEffect::Breathing {
-                    r,
-                    g,
-                    b,
-                    period_ms: 3000,
-                },
-                false,
-            )?;
-            Ok("Включён эффект дыхания".into())
-        }
-        DeviceCommand::SetRgbOff => {
-            turn_off_all_leds(&device.dev, false)?;
-            Ok("Подсветка выключена".into())
+        DeviceCommand::SetLighting { zone, effect } => {
+            if device.onboard || !device.known {
+                return Err(
+                    "Выключите внутреннюю память в профилях перед настройкой подсветки".into(),
+                );
+            }
+            let zones = match zone {
+                Some(zone) => vec![zone],
+                None => {
+                    let count = crate::hidpp::features::get_zone_count(&device.dev)?;
+                    [LedZone::DpiLeds, LedZone::Logo]
+                        .into_iter()
+                        .take(count.min(2) as usize)
+                        .collect()
+                }
+            };
+            let mut errors = Vec::new();
+            for zone in zones {
+                if let Err(error) = set_led_effect(&device.dev, zone, effect, false) {
+                    errors.push(format!("{zone:?}: {error}"));
+                }
+            }
+            if !errors.is_empty() {
+                return Err(errors.join("; "));
+            }
+            Ok(if effect == LedEffect::Off {
+                "Подсветка выключена"
+            } else {
+                "Эффект подсветки применён"
+            }
+            .into())
         }
         DeviceCommand::SyncAllOnboardSlots(dpi) => {
             crate::hidpp::features::sync_all_onboard_profiles_dpi(&device.dev, dpi)?;

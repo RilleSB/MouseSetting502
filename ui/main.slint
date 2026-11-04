@@ -1,10 +1,9 @@
+import { HubButton, HubMouse } from "ghub-controls.slint";
 import { ReportRate } from "report-rate.slint";
 import { AppSettings } from "app-settings.slint";
-import { MouseMap } from "mouse-map.slint";
-import { KeybindRow } from "keybind-row.slint";
 import { MemoryControls } from "memory-controls.slint";
 import { KeyAssignmentEditor } from "key-assignment-editor.slint";
-    import { Slider, ScrollView, LineEdit } from "std-widgets.slint";
+import { Slider, ScrollView, LineEdit, ComboBox, CheckBox } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import {
     Card, Pill, IconButton, SidebarItem, Modal,
@@ -15,6 +14,16 @@ import {
 export struct TabItem {
     id: int,
     title: string,
+}
+
+export struct ReleaseItem {
+    tag: string,
+    title: string,
+    date: string,
+    summary: string,
+    url: string,
+    prerelease: bool,
+    latest: bool,
 }
 
 export struct SwatchItem {
@@ -57,12 +66,12 @@ export struct QuickKeyItem {
     }
 
     export component MainWindow inherits Window {
-        title: "Mouse Settings 502";
+        title: "Mouse Settings 502 · G502 HERO";
         icon: @image-url("assets/app-icon.png");
-        min-width: 1040px;
+        min-width: 1200px;
         min-height: 700px;
-        preferred-width: 1080px;
-        preferred-height: 740px;
+        preferred-width: 1440px;
+        preferred-height: 900px;
         background: Theme.app_bg;
         default-font-family: "Segoe UI";
 
@@ -104,10 +113,11 @@ export struct QuickKeyItem {
 
         in property <[int]> quick_delays: [10, 25, 50, 100, 250];
 
-        in-out property <int> active_tab: 1;
+        in-out property <int> active_tab: 0;
         in-out property <int> autostart_state: -1;
         in-out property <string> autostart_error: "";
         callback set_autostart(bool);
+        callback refresh_autostart();
         in-out property <string> app_version: "1.0.0";
         in-out property <string> build_git_hash: "";
         in-out property <string> local_sha256: "";
@@ -119,6 +129,12 @@ export struct QuickKeyItem {
         callback check_for_updates();
         callback open_releases_page();
         callback open_github_repo();
+        in-out property <[ReleaseItem]> community_items: [];
+        in-out property <bool> community_loading: false;
+        in-out property <bool> community_loaded: false;
+        in-out property <string> community_error: "";
+        callback load_community(bool);
+        callback open_community_release(string);
         in-out property <string> device_name: "Поиск мыши G502 HERO...";
         in-out property <bool> device_connected: false;
         in-out property <string> headset_name: "Logitech G435 Lightspeed";
@@ -146,6 +162,26 @@ export struct QuickKeyItem {
         in-out property <[string]> builder_steps: [];
         in-out property <string> builder_custom_delay: "50";
         in-out property <string> builder_error: "";
+
+        in-out property <int> builder_mode: 0;
+        in-out property <int> builder_phase: 1;
+        in-out property <[int]> builder_phase_counts: [0,0,0];
+        in-out property <bool> builder_standard_delay: true;
+        in-out property <string> builder_default_delay: "50";
+        in-out property <string> builder_delay_input: "50";
+        in-out property <string> builder_key_input: "A";
+        in-out property <int> builder_selected_step: -1;
+        in-out property <bool> builder_recording: false;
+        in-out property <bool> builder_confirm_close: false;
+        callback builder_set_phase(int);
+        callback builder_refresh_timing();
+        callback builder_add_chord(string, int);
+        callback builder_insert_delay(string);
+        callback builder_select_step(int);
+        callback builder_update_delay(int, string);
+        callback builder_toggle_recording();
+        callback builder_capture_key(string, bool);
+        callback builder_capture_mouse(int, bool);
 
         // Keybind picker modal
         in-out property <bool> show_bind_picker: false;
@@ -186,10 +222,7 @@ export struct QuickKeyItem {
         callback add_dpi_preset(int);
         callback remove_dpi_preset(int);
         callback apply_custom_dpi(string);
-        callback set_rgb_static(int, int, int);
-        callback set_rgb_cycle();
-        callback set_rgb_breathe(int, int, int);
-        callback set_rgb_off();
+        callback apply_lighting(bool);
         callback toggle_macro(string);
         callback stop_all_macros();
         callback refresh_devices();
@@ -214,849 +247,345 @@ export struct QuickKeyItem {
         callback close_keybind_picker();
         callback assign_keybind(string, string);
         callback clear_keybind(string);
+        pure callback search_matches(string, string) -> bool;
 
-        VerticalLayout {
-            padding: 0px;
-            spacing: 0px;
+        // Navigation uses the existing controller tab IDs.
+        in-out property <int> assignment_view: 1;
+        in-out property <int> assignment_category: 0;
+        in-out property <string> assignment_search: "";
+        in-out property <string> profile_search: "";
+        in-out property <int> profile_filter: 0;
+        in-out property <bool> profile_menu: false;
+        in-out property <bool> grid_view: false;
+        in-out property <int> lighting_effect: 0;
+        in-out property <int> lighting_zone: 1;
+        in-out property <int> lighting_r: 0;
+        in-out property <int> lighting_g: 174;
+        in-out property <int> lighting_b: 255;
+        in-out property <float> effect_speed: 20;
+        in-out property <float> effect_brightness: 100;
+        property <int> cycle_step: 0;
+        Timer {
+            interval: root.effect_speed * 1000ms / 8;
+            running: root.active_tab == 2 && root.lighting_effect == 0;
+            triggered => { root.cycle_step = Math.mod(root.cycle_step + 1, root.swatches.length); }
+        }
+        property <int> breath_step: 0;
+        Timer {
+            interval: root.effect_speed * 1000ms / 40;
+            running: root.active_tab == 2 && root.lighting_effect == 2;
+            triggered => { root.breath_step = Math.mod(root.breath_step + 1, 40); }
+        }
+        property <bool> device_page: root.active_tab == 1 || root.active_tab == 2 || root.active_tab == 4;
 
-            // ==========================================
-            // HEADER BAR
-            // ==========================================
+        Rectangle {
+            x: 0px; y: 0px; width: 100%; height: 88px;
+            if root.active_tab == 0 || root.active_tab == 5 || root.active_tab == 6 || root.active_tab == 7 : Rectangle {
+                x: 0px; y: 0px; width: 510px; height: 88px;
+                HubButton { x: 24px; y: 25px; width: 58px; text: "app-logo"; font-size: 34px; clicked => { root.active_tab = 0; } }
+                HubButton { x: 105px; y: 28px; width: 100px; text: "Устройства"; active: root.active_tab == 0; clicked => { root.active_tab = 0; } }
+                HubButton { x: 220px; y: 28px; width: 110px; text: "Сообщество"; active: root.active_tab == 7; clicked => { root.active_tab = 7; root.load_community(false); } }
+                HubButton { x: 345px; y: 28px; width: 85px; text: "Профили"; active: root.active_tab == 5; clicked => { root.active_tab = 5; } }
+                Rectangle { x: root.active_tab == 5 ? 376px : root.active_tab == 7 ? 263px : 145px; y: 86px; width: 24px; height: 1px; background: Theme.accent; visible: root.active_tab != 6; }
+            }
+            if root.device_page || root.active_tab == 3 : Rectangle {
+                x: 0px; y: 0px; width: 100%; height: 88px;
+                HubButton { x: 13px; y: 27px; width: 46px; text: "←"; font-size: 30px; clicked => { root.active_tab = 0; } }
+                Text { x: 80px; y: 28px; text: "G502 HERO"; font-size: 34px; font-weight: 700; color: white; }
+            }
+            HubButton {
+                x: parent.width - 430px; y: 35px; width: 280px; height: 43px;
+                background: #212224; text: "Рабочий стол: " + root.active_profile_name + "   ˅";
+                clicked => { root.profile_menu = !root.profile_menu; }
+            }
+            HubButton { x: parent.width - 138px; y: 35px; width: 48px; height: 43px; text: "⚙"; font-size: 25px; clicked => { root.active_tab = 6; root.refresh_autostart(); } }
+            Rectangle { x: parent.width - 69px; y: 44px; width: 28px; height: 28px; border-radius: 14px; background: #00afd1;
+                Text { text: "●"; color: white; horizontal-alignment: center; vertical-alignment: center; font-size: 22px; }
+            }
+            Rectangle { y: 87px; width: 100%; height: 1px; background: root.device_page ? black : #303338; }
+        }
+
+        if root.active_tab == 0 : Rectangle {
+            y: 88px; height: parent.height - 88px;
+            HubButton { x: parent.width - 132px; y: 32px; width: 82px; height: 40px; text: root.grid_view ? "Список" : "Сетка"; active: true; background: #212224; clicked => { root.grid_view = !root.grid_view; } }
             Rectangle {
-                height: 64px;
-                background: Theme.header_bg;
-                border-width: 0px;
+                x: (parent.width - self.width) / 2; y: 96px;
+                width: root.grid_view ? 340px : min(888px, parent.width - 160px);
+                height: root.grid_view ? 365px : 150px;
+                background: home-touch.has-hover ? #292a2c : #212224; border-radius: 13px;
+                home-touch := TouchArea { mouse-cursor: pointer; clicked => { root.active_tab = 4; } }
+                Image { source: @image-url("assets/mouse-top.svg"); x: root.grid_view ? 110px : 112px; y: 16px; width: root.grid_view ? 120px : 70px; height: root.grid_view ? 225px : 106px; image-fit: contain; }
+                Text { x: root.grid_view ? 30px : 268px; y: root.grid_view ? 265px : 37px; text: "G502 HERO"; color: white; font-size: 25px; font-weight: 700; }
+                Text { x: root.grid_view ? 30px : 270px; y: root.grid_view ? 305px : 87px; text: root.device_connected ? "Подключено" : "Не подключено"; color: #999b9d; font-size: 12px; }
+                HubButton { x: parent.width - 129px; y: root.grid_view ? 305px : 51px; width: 48px; height: 48px; outlined: true; text: "☼"; font-size: 25px; clicked => { root.active_tab = 2; } }
+                HubButton { x: parent.width - 73px; y: root.grid_view ? 305px : 51px; width: 48px; height: 48px; outlined: true; text: "▧"; font-size: 25px; clicked => { root.active_tab = 5; } }
+            }
+        }
 
-                HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    alignment: space-between;
-
-                    // Brand / Logo
-                    HorizontalLayout {
-                        spacing: 14px;
-                        alignment: center;
-
-                        Rectangle {
-                            width: 36px;
-                            height: 36px;
-                            border-radius: 8px;
-                            background: Theme.accent_subtle;
-                            border-width: 1px;
-                            border-color: Theme.accent_border;
-
-                            Image {
-                                source: @image-url("assets/app-icon.png");
-                                width: 100%;
-                                height: 100%;
-                                image-fit: contain;
-                            }
-                        }
-
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 2px;
-
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Text {
-                                    text: "Mouse Settings 502";
-                                    font-size: 16px;
-                                    font-weight: 800;
-                                    color: Theme.text_heading;
+        if root.device_page : Rectangle {
+            y: 96px; height: parent.height - 114px;
+            VerticalLayout {
+                x: 14px; y: 20px; width: 48px; spacing: 5px; alignment: start;
+                HubButton { height: 48px; text: "⌖"; font-size: 30px; filled: root.active_tab == 1; clicked => { root.active_tab = 1; } }
+                HubButton { height: 48px; text: "⊞"; font-size: 30px; filled: root.active_tab == 4; clicked => { root.active_tab = 4; } }
+                HubButton { height: 48px; text: "☼"; font-size: 30px; filled: root.active_tab == 2; clicked => { root.active_tab = 2; } }
+            }
+            HubButton { x: 14px; y: parent.height - 48px; width: 48px; height: 48px; outlined: true; text: "⚙"; font-size: 24px; clicked => { root.active_tab = 6; root.refresh_autostart(); } }
+            panel := Rectangle {
+                x: 76px; width: 310px; height: parent.height; border-radius: 13px; background: #212224;
+                if root.active_tab == 4 : VerticalLayout {
+                    padding: 16px; spacing: 14px;
+                    Text { text: "Назначения"; color: white; font-size: 25px; height: 42px; }
+                    HorizontalLayout { spacing: 12px; alignment: start;
+                        HubButton { text: "КОМАНДЫ"; width: 90px; active: root.assignment_category == 0; clicked => { root.assignment_category = 0; } }
+                        HubButton { text: "КЛАВИШИ"; width: 88px; active: root.assignment_category == 1; clicked => { root.assignment_category = 1; } }
+                    }
+                    HorizontalLayout { spacing: 4px;
+                        HubButton { text: "ДЕЙСТВИЯ"; active: root.assignment_category == 2; clicked => { root.assignment_category = 2; } }
+                        HubButton { text: "МАКРОСЫ"; active: root.assignment_category == 3; clicked => { root.assignment_category = 3; } }
+                        HubButton { text: "СИСТЕМА"; active: root.assignment_category == 4; clicked => { root.assignment_category = 4; } }
+                    }
+                    Text { text: "Чтобы назначить команду, выберите кнопку на мыши."; color: white; font-size: 13px; wrap: word-wrap; }
+                    LineEdit { text <=> root.assignment_search; placeholder-text: "Поиск назначений"; }
+                    if root.assignment_category != 3 : ScrollView {
+                        VerticalLayout { spacing: 0px;
+                            Text { text: root.assignment_category == 1 ? "Клавиши мыши" : root.assignment_category == 4 ? "Системные команды" : "Назначения G502 HERO"; height: 38px; color: white; font-size: 14px; font-weight: 600; }
+                            for item in root.keybind_items : Rectangle {
+                                visible: root.assignment_search == "" || root.search_matches(item.button_label, root.assignment_search) || root.search_matches(item.assigned_label, root.assignment_search);
+                                height: self.visible ? 48px : 0px;
+                                background: binding-touch.has-hover ? #303133 : transparent;
+                                HorizontalLayout { padding: 6px; spacing: 12px;
+                                    Text { text: item.button_id; color: white; font-size: 13px; width: 38px; vertical-alignment: center; }
+                                    Text { text: item.assigned_label == "" ? item.default_action : item.assigned_label; color: #a4a4a7; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
                                 }
-                                Text {
-                                    text: "G502";
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    color: Theme.accent;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            Text {
-                                text: "Настройки мыши";
-                                font-size: 10px;
-                                font-weight: 600;
-                                color: Theme.text_muted;
+                                Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: #3b3c3e; }
+                                binding-touch := TouchArea { mouse-cursor: pointer; clicked => { root.open_keybind_picker(item.button_id, item.button_label); } }
                             }
                         }
                     }
-
-                    // Device Status Indicators & Metrics
-                    HorizontalLayout {
-                        spacing: 12px;
-                        alignment: center;
-
-                        IconButton {
-                            icon: "Обзор";
-                            icon_size: 11px;
-                            btn_width: 64px;
-                            clicked => { root.active_tab = 0; }
+                    if root.assignment_category == 3 : ScrollView {
+                        VerticalLayout { spacing: 8px;
+                            HubButton { text: "+ СОЗДАТЬ МАКРОС"; filled: true; clicked => { root.open_macro_builder(); } }
+                            for item in root.macro_items : HubButton { text: item.name; outlined: true; clicked => { root.edit_custom_macro(item.name); } }
+                            HubButton { text: "Открыть студию макросов →"; clicked => { root.active_tab = 3; } }
                         }
-
-                        IconButton {
-                            icon: "Настройки";
-                            icon_size: 11px;
-                            btn_width: 80px;
-                            clicked => { root.active_tab = 6; }
+                    }
+                }
+                if root.active_tab == 2 : VerticalLayout {
+                    padding: 16px; spacing: 22px; alignment: start;
+                    Text { text: "LIGHTSYNC"; color: white; font-size: 25px; height: 40px; }
+                    Text { text: "☼  НАСТРОЙКИ ПОДСВЕТКИ"; color: Theme.accent; font-size: 14px; font-weight: 700; }
+                    HorizontalLayout { spacing: 10px;
+                        HubButton { text: "ОСНОВНАЯ"; active: root.lighting_zone == 0; clicked => { root.lighting_zone = 0; } }
+                        HubButton { text: "ЛОГОТИП"; active: root.lighting_zone == 1; clicked => { root.lighting_zone = 1; } }
+                    }
+                    Text { text: "ЭФФЕКТ"; color: #adaeb2; font-size: 13px; }
+                    ComboBox { model: ["Цикл", "Постоянный", "Дыхание", "Выключено"]; current-index <=> root.lighting_effect;
+                        selected(value) => {
+                            root.apply_lighting(false);
                         }
-
-                        IconButton {
-                            icon: "GitHub";
-                            icon_size: 11px;
-                            btn_width: 68px;
-                            clicked => { root.open_github_repo(); }
+                    }
+                    Text { text: "ЦВЕТ"; color: #adaeb2; font-size: 13px; }
+                    HorizontalLayout { spacing: 7px;
+                        for sw in root.swatches : Rectangle {
+                            height: 24px; border-radius: 12px; background: sw.col;
+                            border-width: root.current_color == sw.col ? 2px : 0px; border-color: white;
+                            TouchArea { mouse-cursor: pointer; clicked => { if root.lighting_effect == 0 || root.lighting_effect == 3 { root.lighting_effect = 1; } root.current_color = sw.col; root.lighting_r = sw.r; root.lighting_g = sw.g; root.lighting_b = sw.b; root.apply_lighting(false); } }
                         }
-
-                        // Mouse status pill
-                        Pill {
-                            text: root.device_connected ? root.device_name : "Мышь не обнаружена";
-                            text_color: root.device_connected ? Theme.text_heading : Theme.error_text;
-                            bg_col: root.device_connected ? Theme.success_bg : Theme.error_subtle;
-                            border_col: root.device_connected ? Theme.success : Theme.error;
-                            dot_color: root.device_connected ? Theme.success_dot : Theme.error;
-                            show_dot: true;
+                    }
+                    Text { text: "ПЕРИОД ЭФФЕКТА"; color: #adaeb2; font-size: 13px; }
+                    HorizontalLayout { Slider { minimum: 1; maximum: 20; value <=> root.effect_speed; changed => { root.apply_lighting(false); } } Text { text: Math.round(root.effect_speed * 1000) + " мс"; color: white; width: 70px; vertical-alignment: center; } }
+                    Text { text: "ЯРКОСТЬ"; color: #adaeb2; font-size: 13px; }
+                    HorizontalLayout { Slider { minimum: 1; maximum: 100; value <=> root.effect_brightness; changed => { root.apply_lighting(false); } } Text { text: Math.round(root.effect_brightness) + "%"; color: white; width: 50px; vertical-alignment: center; } }
+                    HubButton { text: "СИНХРОНИЗИРОВАТЬ ЗОНЫ"; background: #393a3c; height: 50px; clicked => { root.apply_lighting(true); } }
+                }
+                if root.active_tab == 1 : VerticalLayout {
+                    padding: 16px; spacing: 20px; alignment: start;
+                    Text { text: "Чувствительность\n(DPI)"; color: white; font-size: 25px; }
+                    Text { text: "DPI — это скорость курсора мыши на экране. Ее можно быстро менять с помощью кнопок DPI на мыши."; color: white; font-size: 13px; wrap: word-wrap; }
+                    Text { text: "СКОРОСТИ DPI"; color: #adaeb2; font-size: 14px; }
+                    HorizontalLayout { spacing: 5px;
+                        for dpi in root.dpi_presets : HubButton { text: "" + dpi; active: root.current_dpi == dpi; font-size: 14px; clicked => { root.set_dpi(dpi); } }
+                    }
+                    Text { text: "Текущая скорость: " + root.current_dpi + " DPI.\nВыберите точку на шкале или укажите точное значение."; color: white; font-size: 13px; wrap: word-wrap; }
+                    HorizontalLayout { spacing: 8px;
+                        LineEdit { text <=> root.custom_dpi_input; placeholder-text: "100–25600 DPI"; accepted => { root.apply_custom_dpi(root.custom_dpi_input); } }
+                        HubButton { text: "OK"; width: 38px; outlined: true; clicked => { root.apply_custom_dpi(root.custom_dpi_input); } }
+                    }
+                    HubButton { text: "+  НАЗНАЧИТЬ ДЛЯ МЫШИ"; clicked => { root.active_tab = 4; } }
+                    ReportRate { intervals: root.report_rate_intervals; current: root.report_rate_interval; busy: root.report_rate_busy; connected: root.device_connected; onboard: root.onboard_enabled; mode-known: root.onboard_known; select(interval) => { root.set_report_rate(interval); } }
+                    HubButton { text: "+ СОХРАНИТЬ ТЕКУЩИЙ DPI"; outlined: true; clicked => { root.add_dpi_preset(root.current_dpi); } }
+                }
+            }
+            canvas := Rectangle {
+                x: 402px; width: parent.width - 418px; height: parent.height;
+                if root.active_tab == 4 || root.active_tab == 2 : HubMouse {
+                    y: root.active_tab == 2 ? 75px : 35px;
+                    width: parent.width; height: parent.height - 100px;
+                    side: root.active_tab == 4 && root.assignment_view == 2;
+                    assignments: root.active_tab == 4;
+                    glow: root.active_tab == 4 ? #686868 : root.lighting_effect == 3 ? #222222 : root.lighting_effect == 0 ? root.swatches[root.cycle_step].col : root.current_color;
+                    light-level: root.active_tab != 2 ? 1 : root.lighting_effect == 3 ? 0 : root.effect_brightness / 100 * (root.lighting_effect == 2 ? Math.abs(root.breath_step - 20) / 20 : 1);
+                    select(id,label) => { root.open_keybind_picker(id,label); }
+                }
+                if root.active_tab == 4 : Rectangle {
+                    x: (parent.width - 300px) / 2; y: parent.height - 125px; width: 300px; height: 110px;
+                    HorizontalLayout { y: 0px; height: 28px; spacing: 14px;
+                        HubButton { text: "ПРОСМОТРЕТЬ 1"; outlined: true; active: root.assignment_view == 1; clicked => { root.assignment_view = 1; } }
+                        HubButton { text: "ПРОСМОТРЕТЬ 2"; outlined: true; active: root.assignment_view == 2; clicked => { root.assignment_view = 2; } }
+                    }
+                    Text { y: 55px; width: 100%; text: "ПО УМОЛЧАНИЮ"; color: #ddd; font-size: 13px; font-weight: 700; horizontal-alignment: center; }
+                }
+                if root.active_tab == 2 : HubButton { x: (parent.width - 288px) / 2; y: parent.height - 110px; width: 288px; height: 48px; text: "ПАРАМЕТРЫ ПОДСВЕТКИ"; background: #393a3c; clicked => { root.active_tab = 6; root.refresh_autostart(); } }
+                if root.active_tab == 1 : Rectangle {
+                    Text { y: 18px; width: 100%; text: "СКОРОСТИ DPI"; color: white; font-size: 25px; horizontal-alignment: center; }
+                    Text { y: 86px; width: 100%; text: "◆  СКОРОСТЬ ПЕРЕКЛЮЧЕНИЯ DPI"; color: #ffcc00; font-size: 13px; font-weight: 700; horizontal-alignment: center; }
+                    Text { y: 128px; width: 100%; text: "Щелкните показатель скорости DPI, чтобы выбрать его.\nИспользуйте ползунок для точной настройки скорости."; color: white; font-size: 13px; horizontal-alignment: center; }
+                    dpi-track := Rectangle {
+                        x: 65px; y: parent.height * 0.46; width: parent.width - 130px; height: 100px;
+                        Rectangle { y: 35px; height: 3px; width: 100%; background: #555557; }
+                        for tick in 25 : Rectangle { x: parent.width * tick / 24; y: 31px; width: 1px; height: 10px; background: #88888a; }
+                        for dpi in root.dpi_presets : Rectangle {
+                            x: (parent.width - 28px) * (dpi <= 4000 ? (dpi - 100) / 3900 * 0.67 : 0.67 + (dpi - 4000) / 21600 * 0.33);
+                            y: 0px; width: 28px; height: 60px;
+                            Text { x: -24px; y: 0px; height: 20px; width: 76px; text: "" + dpi; color: root.current_dpi == dpi ? #ffcc00 : white; horizontal-alignment: center; font-size: 15px; font-weight: 700; }
+                            Rectangle { x: 8px; y: 30px; width: 13px; height: 13px; border-radius: root.current_dpi == dpi ? 2px : 7px; background: root.current_dpi == dpi ? #ffcc00 : white; }
+                            TouchArea { mouse-cursor: pointer; clicked => { root.set_dpi(dpi); } }
                         }
+                        Text { x: 0px; y: 70px; text: "100"; color: #aaa; font-size: 12px; }
+                        Text { x: parent.width * 0.335; y: 70px; text: "2000"; color: #aaa; font-size: 12px; }
+                        Text { x: parent.width * 0.67; y: 70px; text: "4000"; color: #aaa; font-size: 12px; }
+                        Text { x: parent.width - 40px; y: 70px; text: "25600"; color: #aaa; font-size: 12px; }
+                    }
+                    Slider { x: 65px; y: parent.height * 0.46 + 115px; width: parent.width - 130px; minimum: 100; maximum: 25600; value: root.current_dpi; released => { root.set_dpi(Math.round(self.value / 50) * 50); } }
+                    Text { y: parent.height * 0.68; x: 40px; width: parent.width - 80px; text: "Для быстрого изменения скорости назначьте переключение DPI кнопкам мыши."; color: #ffcc00; font-size: 13px; horizontal-alignment: center; wrap: word-wrap; }
+                }
+            }
+        }
 
-                        // Headset status pill
-                        Pill {
-                            text: root.headset_connected ? "🎧 G435: Подключен" : "🎧 G435: Беспроводной";
-                            text_color: root.headset_connected ? Theme.accent : Theme.text_inactive;
-                            bg_col: root.headset_connected ? Theme.headset_bg_connected : Theme.headset_bg_disconnected;
-                            border_col: root.headset_connected ? Theme.accent : Theme.headset_border_disconnected;
+        if root.active_tab == 5 : Rectangle {
+            y: 88px; height: parent.height - 88px;
+            Rectangle { x: 0px; y: 0px; width: 337px; height: 100%; border-width: 1px; border-color: #303338;
+                VerticalLayout { x: 48px; y: 34px; width: 269px; spacing: 0px; alignment: start;
+                    HubButton { text: "Все                                      " + root.profile_items.length; active: root.profile_filter == 0; background: root.profile_filter == 0 ? #001e2c : transparent; clicked => { root.profile_filter = 0; } }
+                    HubButton { text: "Активно"; active: root.profile_filter == 1; clicked => { root.profile_filter = 1; } }
+                    HubButton { text: "Отключено"; active: root.profile_filter == 2; clicked => { root.profile_filter = 2; } }
+                }
+                VerticalLayout { x: 48px; y: parent.height - 210px; width: 269px; spacing: 14px; alignment: start;
+                    Text { text: "Переключение профилей"; color: white; font-size: 16px; }
+                    Text { text: "Текущий профиль"; color: #aaa; font-size: 13px; }
+                    HubButton { text: root.active_profile_name + "  ˅"; background: #161719; clicked => { root.profile_menu = !root.profile_menu; } }
+                    HubButton { text: "Следующий профиль →"; outlined: true; clicked => { root.next_app_profile(); } }
+                }
+            }
+            Rectangle { x: 401px; y: 34px; width: parent.width - 453px; height: parent.height - 60px;
+                Text { x: 0px; y: 0px; text: "Все игры и приложения"; color: white; font-size: 25px; font-weight: 600; }
+                Text { x: 0px; y: 38px; width: parent.width - 560px; text: "Выберите профиль, чтобы управлять назначениями, макросами и настройками мыши."; color: #c5c5c8; font-size: 13px; wrap: word-wrap; }
+                LineEdit { x: parent.width - 545px; y: 0px; width: 220px; height: 48px; text <=> root.profile_search; placeholder-text: "Поиск"; }
+                HubButton { x: parent.width - 310px; y: 0px; width: 310px; height: 48px; text: "+  ДОБАВИТЬ ПРОФИЛЬ"; filled: true; clicked => { root.new_profile_name = ""; root.new_profile_desc = ""; root.show_profile_creator = true; } }
+                ScrollView { y: 110px; height: parent.height - 260px;
+                    VerticalLayout { spacing: 16px; alignment: start;
+                        for item in root.profile_items : Rectangle {
+                            visible: (root.profile_filter == 0 || (root.profile_filter == 1 && item.is_active) || (root.profile_filter == 2 && !item.is_active)) && (root.profile_search == "" || root.search_matches(item.name, root.profile_search));
+                            height: self.visible ? 362px : 0px;
+                            Rectangle { x: 0px; y: 0px; width: 192px; height: parent.height; border-radius: 13px; border-width: 1px; border-color: item.is_active ? Theme.accent : #404144; background: item.is_active ? #001624 : #151618;
+                                Image { x: 12px; y: 12px; width: 168px; height: 220px; source: @image-url("assets/desktop-profile.svg"); image-fit: cover; }
+                                Text { x: 12px; y: 250px; width: 168px; text: item.name; color: white; font-size: 14px; overflow: elide; }
+                                Text { x: 12px; y: 300px; text: item.is_active ? "АКТИВНЫЙ" : "ВЫБРАТЬ"; color: Theme.accent; font-size: 11px; }
+                                TouchArea { mouse-cursor: pointer; clicked => { root.switch_profile(item.id); } }
+                            }
+                            VerticalLayout { x: 218px; y: 20px; width: 210px; spacing: 12px; alignment: start;
+                                Text { text: item.description; color: #aaa; font-size: 13px; wrap: word-wrap; }
+                                Text { text: item.dpi_info; color: #aaa; font-size: 13px; wrap: word-wrap; }
+                                HubButton { text: "Дублировать"; outlined: true; clicked => { root.duplicate_profile(item.id); } }
+                                HubButton { text: "Удалить"; outlined: true; clicked => { root.delete_profile(item.id); } }
+                            }
                         }
+                    }
+                }
+                MemoryControls { y: parent.height - 140px; height: 140px; connected: root.device_connected; known: root.onboard_known; busy: root.onboard_busy; onboard: root.onboard_enabled; g9-locked: root.g9_locked; buttons-ready: root.hardware_buttons_ready; slot: root.active_onboard_slot; change-mode(enabled) => { root.set_memory_mode(enabled); } toggle-g9 => { root.toggle_g9_lock(); } }
+            }
+        }
 
-                        // Profile pill
-                        Rectangle {
-                            height: 28px;
-                            border-radius: Theme.radius_md;
-                            background: Theme.surface_elevated;
-                            border-width: 1px;
-                            border-color: Theme.accent_border;
-
-                            HorizontalLayout {
-                                padding-left: 10px; padding-right: 10px;
-                                spacing: 6px;
-                                alignment: center;
-
-                                Text { text: "📁"; font-size: 11px; vertical-alignment: center; }
-                                Text {
-                                    text: root.active_profile_name;
-                                    font-size: Theme.font_caption;
-                                    font-weight: 700;
-                                    color: Theme.accent;
-                                    vertical-alignment: center;
+        if root.active_tab == 7 : Rectangle {
+            x: 76px; y: 122px; width: parent.width - 128px; height: parent.height - 154px;
+            VerticalLayout {
+                spacing: 22px;
+                HorizontalLayout { spacing: 24px;
+                    VerticalLayout { spacing: 7px;
+                        Text { text: "Сообщество"; color: white; font-size: 30px; font-weight: 700; }
+                        Text { text: "Новости и последние обновления MouseSetting502"; color: #a4a7ac; font-size: 14px; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: "Версия приложения  " + root.app_version; color: #a4a7ac; font-size: 13px; vertical-alignment: center; }
+                    HubButton { width: 140px; text: root.community_loading ? "Загрузка…" : "Обновить"; outlined: true; clicked => { root.load_community(true); } }
+                    HubButton { width: 180px; text: "Репозиторий на GitHub"; outlined: true; clicked => { root.open_github_repo(); } }
+                }
+                Rectangle { height: 1px; background: #303338; }
+                if root.community_loading : Text { text: "Получаем опубликованные заметки об обновлениях…"; color: Theme.accent; font-size: 13px; }
+                if root.community_error != "" : Rectangle {
+                    background: #2c2120; border-radius: 8px;
+                    VerticalLayout { padding: 16px;
+                        Text { text: root.community_error; color: #f4baaa; font-size: 13px; wrap: word-wrap; }
+                    }
+                }
+                if root.community_loaded && !root.community_loading && root.community_items.length == 0 : Text {
+                    text: "Пока нет опубликованных обновлений. Новые релизы появятся здесь после публикации на GitHub.";
+                    color: #a4a7ac; font-size: 15px; wrap: word-wrap;
+                }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout { spacing: 18px; alignment: start;
+                        for release in root.community_items : Rectangle {
+                            background: #202224; border-radius: 12px; border-width: 1px;
+                            border-color: release.latest ? #14577b : #34373b;
+                            VerticalLayout { padding: 24px; spacing: 16px;
+                                HorizontalLayout { spacing: 14px;
+                                    Rectangle { width: 92px; height: 31px; border-radius: 6px; background: #07334d;
+                                        Text { text: release.tag; color: #29b7ff; font-size: 14px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                    Text { text: release.title; color: white; font-size: 21px; font-weight: 600; vertical-alignment: center; }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    if release.latest : Text { text: "ПОСЛЕДНИЙ РЕЛИЗ"; color: Theme.accent; font-size: 11px; vertical-alignment: center; }
+                                    if release.prerelease : Text { text: "ТЕСТОВАЯ ВЕРСИЯ"; color: #dfbc65; font-size: 11px; vertical-alignment: center; }
+                                    Text { text: release.date; color: #93979d; font-size: 13px; vertical-alignment: center; }
+                                }
+                                Text { text: release.summary; color: #c5c8cd; font-size: 14px; wrap: word-wrap; }
+                                HorizontalLayout { spacing: 16px;
+                                    Text { text: "Из заметок автора к обновлению"; color: #858a91; font-size: 12px; vertical-alignment: center; }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    HubButton { width: 180px; text: "Подробнее о релизе →"; outlined: true; clicked => { root.open_community_release(release.url); } }
                                 }
                             }
-
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.active_tab = 5; }
-                            }
-                        }
-
-                        // Refresh button
-                        IconButton {
-                            icon: "🔄";
-                            icon_size: 13px;
-                            clicked => { root.refresh_devices(); }
                         }
                     }
                 }
             }
+        }
 
-            // Divider
-            Rectangle {
-                height: 1px;
-                background: Theme.divider;
+        if root.active_tab == 6 : AppSettings {
+            x: 76px; y: 106px; width: parent.width - 110px; height: parent.height - 140px;
+            startup-state: root.autostart_state; startup-error: root.autostart_error;
+            set-startup(enabled) => { root.set_autostart(enabled); }
+            refresh-startup => { root.refresh_autostart(); }
+            app-version: root.app_version; build-git-hash: root.build_git_hash; local-sha256: root.local_sha256;
+            update-status-kind: root.update_status_kind; update-status-msg: root.update_status_msg;
+            remote-tag: root.remote_tag; remote-sha256: root.remote_sha256; release-url: root.release_url;
+            check-update => { root.check_for_updates(); } open-releases => { root.open_releases_page(); } open-repository => { root.open_github_repo(); }
+        }
+
+        Text { x: 405px; y: parent.height - 22px; width: parent.width - 440px; height: 18px; text: root.status_msg; color: #747577; font-size: 11px; overflow: elide; }
+
+        if root.profile_menu : Rectangle {
+            x: parent.width - 430px; y: 82px; width: 280px; height: min(360px, root.profile_items.length * 44px + 56px); background: #252628; border-radius: 8px; border-width: 1px; border-color: #454648;
+            VerticalLayout { padding: 8px; spacing: 4px;
+                for item in root.profile_items : HubButton { text: item.name; active: item.is_active; clicked => { root.switch_profile(item.id); root.profile_menu = false; } }
+                HubButton { text: "УПРАВЛЕНИЕ ПРОФИЛЯМИ →"; clicked => { root.active_tab = 5; root.profile_menu = false; } }
             }
+        }
 
-            // ==========================================
-            // MAIN BODY: SIDEBAR + CONTENT AREA
-            // ==========================================
-            HorizontalLayout {
-                spacing: 0px;
-                vertical-stretch: 1;
-
-                // --- Modern Sidebar Navigation ---
-                Rectangle {
-                    width: 235px;
-                    background: Theme.header_bg;
-
-                    VerticalLayout {
-                        padding-top: 18px;
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        padding-bottom: 18px;
-                        spacing: 6px;
-                        alignment: space-between;
-
-                        VerticalLayout {
-                            spacing: 6px;
-
-                            for tab in root.tabs : SidebarItem {
-                                title: tab.title;
-                                active: root.active_tab == tab.id || (tab.id == 4 && root.active_tab == 3);
-                                clicked => { root.active_tab = tab.id; }
-                            }
-                        }
-
-                        // Bottom sidebar quick summary
-                        Rectangle {
-                            height: 112px;
-                            border-radius: 8px;
-                            background: Theme.card_bg;
-                            border-width: 1px;
-                            border-color: Theme.border_default;
-
-                            VerticalLayout {
-                                padding: 12px;
-                                spacing: 5px;
-
-                                Text {
-                                    text: "СИСТЕМНЫЙ СТАТУС";
-                                    font-size: 10px;
-                                    font-weight: 800;
-                                    color: Theme.text_muted;
-                                }
-
-                                Text {
-                                    text: "Сенсор: HERO 25K • " + root.current_dpi + " DPI";
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    color: Theme.text_white_dim;
-                                }
-
-                                Text {
-                                    text: root.active_macro_name != "" ? ("🟢 Макрос: " + root.active_macro_name) : "⚪ Макрос: Остановлен";
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    color: root.active_macro_name != "" ? Theme.accent : Theme.text_subtle;
-                                }
-
-                                Text {
-                                    text: root.listener_active ? "🟢 Low-Level Hook: Активен" : "⚪ Hook: Отключен";
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    color: root.listener_active ? Theme.success : Theme.text_subtle;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Vertical Divider
-                Rectangle {
-                    width: 1px;
-                    background: Theme.divider;
-                }
-
-                // --- Content Canvas ---
-                Rectangle {
-                    horizontal-stretch: 1;
-                    background: Theme.app_bg;
-
-                    VerticalLayout {
-                        padding: 24px;
-                        spacing: 16px;
-
-                        // ==========================================
-                        // TAB 0: DEVICE OVERVIEW
-                        // ==========================================
-                        if root.active_tab == 0 : ScrollView {
-                        content-width: self.visible-width;
-                        horizontal-scrollbar-policy: always-off;
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 16px;
-
-                            Text {
-                                text: "Обзор подключенных устройств";
-                                font-size: 20px;
-                                font-weight: 800;
-                                color: Theme.text_primary;
-                            }
-                            HorizontalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    max-width: 820px;
-                                    horizontal-stretch: 1;
-                                    background: transparent;
-                                    VerticalLayout {
-                                        spacing: 16px;
-
-                            // Card 1: G502 HERO
-                            Rectangle {
-                                height: 160px;
-                                border-radius: 10px;
-                                background: Theme.card_bg_subtle;
-                                border-width: 1px;
-                                border-color: root.device_connected ? Theme.border_card : Theme.error_subtle;
-
-                                HorizontalLayout {
-                                    padding: 20px;
-                                    spacing: 20px;
-
-                                    Rectangle {
-                                        width: 120px;
-                                        height: 120px;
-                                        border-radius: 8px;
-                                        background: Theme.surface_alt;
-                                        border-width: 1px;
-                                        border-color: Theme.border_card;
-
-                                        VerticalLayout {
-                                            alignment: center;
-                                            spacing: 6px;
-                                            Text {
-                                                text: "🖱️";
-                                                font-size: 38px;
-                                                horizontal-alignment: center;
-                                            }
-                                            Text {
-                                                text: "G502 HERO";
-                                                font-size: 11px;
-                                                font-weight: 800;
-                                                color: Theme.accent;
-                                                horizontal-alignment: center;
-                                            }
-                                        }
-                                    }
-
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 6px;
-
-                                        HorizontalLayout {
-                                            spacing: 12px;
-                                            Text {
-                                                text: root.device_name;
-                                                font-size: 17px;
-                                                font-weight: 800;
-                                                color: Theme.text_primary;
-                                            }
-                                            Rectangle {
-                                                height: 22px;
-                                                border-radius: 4px;
-                                                background: root.device_connected ? Theme.success_bg : Theme.error_subtle;
-                                                HorizontalLayout {
-                                                    padding-left: 8px; padding-right: 8px;
-                                                    Text {
-                                                        text: root.device_connected ? "HERO 25K READY" : "ОФФЛАЙН";
-                                                        font-size: 10px;
-                                                        font-weight: 700;
-                                                        color: root.device_connected ? Theme.success_dot : Theme.error_bright;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        Text {
-                                            text: "• Оптический сенсор HERO 25K (100 - 25 600 DPI, шаг 50)\n• "
-                                                + (!root.onboard_known ? "Режим мыши неизвестен" : root.onboard_enabled ? "Внутренняя память включена" : "Программный режим")
-                                                + "\n• 11 программируемых клавиш • LIGHTSYNC RGB подсветка";
-                                            font-size: 12px;
-                                            color: Theme.text_secondary;
-                                        }
-
-                                        HorizontalLayout {
-                                            spacing: 10px;
-                                            Rectangle {
-                                                width: 140px; height: 32px; border-radius: 6px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                                HorizontalLayout { alignment: center; Text { text: "🎯 Настроить DPI"; font-size: 12px; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; } }
-                                                TouchArea { clicked => { root.active_tab = 1; } }
-                                            }
-                                            Rectangle {
-                                                width: 160px; height: 32px; border-radius: 6px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                                HorizontalLayout { alignment: center; Text { text: "🎛️ Назначить клавиши"; font-size: 12px; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; } }
-                                                TouchArea { clicked => { root.active_tab = 4; } }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Card 2: G435 Lightspeed Headset
-                            Rectangle {
-                                height: 130px;
-                                border-radius: 10px;
-                                background: Theme.card_bg_subtle;
-                                border-width: 1px;
-                                border-color: Theme.border_card;
-
-                                HorizontalLayout {
-                                    padding: 20px;
-                                    spacing: 20px;
-
-                                    Rectangle {
-                                        width: 90px;
-                                        height: 90px;
-                                        border-radius: 8px;
-                                        background: Theme.surface_alt;
-                                        border-width: 1px;
-                                        border-color: Theme.border_card;
-
-                                        VerticalLayout {
-                                            alignment: center;
-                                            spacing: 4px;
-                                            Text {
-                                                text: "🎧";
-                                                font-size: 32px;
-                                                horizontal-alignment: center;
-                                            }
-                                            Text {
-                                                text: "G435";
-                                                font-size: 11px;
-                                                font-weight: 800;
-                                                color: Theme.success;
-                                                horizontal-alignment: center;
-                                            }
-                                        }
-                                    }
-
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 6px;
-
-                                        HorizontalLayout {
-                                            spacing: 12px;
-                                            Text {
-                                                text: root.headset_name;
-                                                font-size: 16px;
-                                                font-weight: 800;
-                                                color: Theme.text_primary;
-                                            }
-                                            Rectangle {
-                                                height: 22px;
-                                                border-radius: 4px;
-                                                background: Theme.surface_alt;
-                                                HorizontalLayout {
-                                                    padding-left: 8px; padding-right: 8px;
-                                                    Text {
-                                                        text: "LIGHTSPEED WIRELESS";
-                                                        font-size: 10px;
-                                                        font-weight: 700;
-                                                        color: Theme.accent;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        Text {
-                                            text: "• 40 мм аудиодрайверы с поддержкой Dolby Atmos\n• Двойные микрофоны с формированием луча (beamforming)\n• Ультралегкая конструкция: 165 г";
-                                            font-size: 12px;
-                                            color: Theme.text_secondary;
-                                        }
-                                    }
-                                }
-                            }
-                                    }
-                                }
-                            }
-                        }
-                        }
-
-                        // ==========================================
-                        // TAB 1: SENSOR & DPI
-                        // ==========================================
-                        if root.active_tab == 1 : ScrollView {
-                        VerticalLayout {
-                            spacing: 18px;
-
-                            Text {
-                                text: "Настройка сенсора HERO 25K";
-                                font-size: Theme.font_title;
-                                font-weight: 800;
-                                color: Theme.text_primary;
-                            }
-
-                            // Big DPI Card with Quick Buttons
-                            Rectangle {
-                                height: 140px;
-                                border-radius: Theme.radius_md;
-                                background: Theme.card_bg_subtle;
-                                border-width: 1px;
-                                border-color: Theme.border_subtle;
-
-                                HorizontalLayout {
-                                    padding: 20px;
-                                    alignment: space-between;
-
-                                    // Button: DPI Down (Previous Preset)
-                                    Rectangle {
-                                        width: 160px;
-                                        height: 48px;
-                                        border-radius: Theme.radius_base;
-                                        background: Theme.surface_alt;
-                                        border-width: 1px;
-                                        border-color: Theme.border_btn;
-
-                                        HorizontalLayout {
-                                            alignment: center;
-                                            spacing: 8px;
-                                            Text { text: "◀"; font-size: Theme.font_caption; color: Theme.accent; vertical-alignment: center; }
-                                            Text { text: "DPI ВНИЗ (G7)"; font-size: Theme.font_caption; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; }
-                                        }
-                                        TouchArea { clicked => { root.dpi_down(); } }
-                                    }
-
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 4px;
-
-                                        Text {
-                                            text: "ТЕКУЩЕЕ РАЗРЕШЕНИЕ СЕНСОРА";
-                                            font-size: Theme.font_xs;
-                                            font-weight: 800;
-                                            color: Theme.text_subtle;
-                                            horizontal-alignment: center;
-                                        }
-                                        Text {
-                                            text: root.current_dpi + " DPI";
-                                            font-size: 42px;
-                                            font-weight: 900;
-                                            color: Theme.accent;
-                                            horizontal-alignment: center;
-                                        }
-                                        Text {
-                                            text: "HERO 25K • Нулевое сглаживание, аппаратная точность 1:1";
-                                            font-size: Theme.font_caption;
-                                            color: Theme.text_muted;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-
-                                    // Button: DPI Up (Next Preset)
-                                    Rectangle {
-                                        width: 160px;
-                                        height: 48px;
-                                        border-radius: Theme.radius_base;
-                                        background: Theme.surface_alt;
-                                        border-width: 1px;
-                                        border-color: Theme.border_btn;
-
-                                        HorizontalLayout {
-                                            alignment: center;
-                                            spacing: 8px;
-                                            Text { text: "DPI ВВЕРХ (G8)"; font-size: Theme.font_caption; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; }
-                                            Text { text: "▶"; font-size: Theme.font_caption; color: Theme.accent; vertical-alignment: center; }
-                                        }
-                                        TouchArea { clicked => { root.dpi_up(); } }
-                                    }
-                                }
-                            }
-
-                            // Dynamic Configurable Presets
-                            VerticalLayout {
-                                spacing: 8px;
-                                Text {
-                                    text: "Настраиваемые пресеты чувствительности (переключение по кнопкам G7/G8):";
-                                    font-size: Theme.font_body;
-                                    font-weight: 700;
-                                    color: Theme.text_white_dim;
-                                }
-
-                                HorizontalLayout {
-                                    spacing: 10px;
-                                    alignment: start;
-                                    for dpi[idx] in root.dpi_presets : Rectangle {
-                                        height: 42px;
-                                        border-radius: Theme.radius_base;
-                                        background: root.current_dpi == dpi ? Theme.accent : Theme.surface_alt;
-                                        border-width: 1px;
-                                        border-color: root.current_dpi == dpi ? Theme.accent : Theme.border_btn;
-
-                                        // Keep selection behind the separate remove button.
-                                        TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => { root.set_dpi(dpi); }
-                                        }
-
-                                        HorizontalLayout {
-                                            padding-left: 14px;
-                                            padding-right: 10px;
-                                            spacing: 8px;
-                                            alignment: center;
-
-                                            Text {
-                                                text: dpi + " DPI";
-                                                font-size: Theme.font_body;
-                                                font-weight: 800;
-                                                color: root.current_dpi == dpi ? Theme.app_bg : Theme.text_white_soft;
-                                                vertical-alignment: center;
-                                            }
-
-                                            // Remove preset button (if more than 1)
-                                            if root.dpi_presets.length > 1 : Rectangle {
-                                                width: 24px;
-                                                height: 24px;
-                                                border-radius: Theme.radius_sm;
-                                                background: remove-touch.has-hover ? Theme.error_btn_bg : (root.current_dpi == dpi ? Theme.app_bg : Theme.surface_elevated);
-                                                accessible-role: button;
-                                                accessible-label: "Удалить " + dpi + " DPI из пресетов";
-
-                                                Text {
-                                                    text: "×";
-                                                    font-size: 20px;
-                                                    font-weight: 700;
-                                                    color: remove-touch.has-hover ? Theme.error_text : (root.current_dpi == dpi ? Theme.accent : Theme.text_white_soft);
-                                                    horizontal-alignment: center;
-                                                    vertical-alignment: center;
-                                                }
-                                                remove-touch := TouchArea {
-                                                    mouse-cursor: pointer;
-                                                    clicked => { root.remove_dpi_preset(dpi); }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Custom DPI Input Section
-                            Rectangle {
-                                border-radius: Theme.radius_md;
-                                background: Theme.card_bg_subtle;
-                                border-width: 1px;
-                                border-color: Theme.border_card;
-
-                                VerticalLayout {
-                                    padding: 16px;
-                                    spacing: 12px;
-
-                                    Text {
-                                        text: "Кастомный DPI (произвольное значение):";
-                                        font-size: Theme.font_body;
-                                        font-weight: 700;
-                                        color: Theme.text_white_dim;
-                                    }
-
-                                    HorizontalLayout {
-                                        spacing: 12px;
-                                        alignment: start;
-
-                                        custom_dpi_input := LineEdit {
-                                            width: 180px;
-                                            height: 40px;
-                                            placeholder-text: "Например: 1350";
-                                            text <=> root.custom_dpi_input;
-                                            accepted => {
-                                                root.apply_custom_dpi(self.text);
-                                            }
-                                        }
-
-                                        // Apply Custom DPI Button
-                                        Rectangle {
-                                            height: 40px;
-                                            border-radius: Theme.radius_base;
-                                            background: Theme.accent;
-
-                                            HorizontalLayout {
-                                                padding-left: 18px;
-                                                padding-right: 18px;
-                                                alignment: center;
-                                                Text {
-                                                    text: "Установить DPI";
-                                                    font-size: Theme.font_body_sm;
-                                                    font-weight: 800;
-                                                    color: Theme.app_bg;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                            TouchArea {
-                                                clicked => {
-                                                    root.apply_custom_dpi(custom_dpi_input.text);
-                                                }
-                                            }
-                                        }
-
-                                        // Add to presets button
-                                        Rectangle {
-                                            height: 40px;
-                                            border-radius: Theme.radius_base;
-                                            background: Theme.surface_alt;
-                                            border-width: 1px;
-                                            border-color: Theme.border_btn;
-
-                                            HorizontalLayout {
-                                                padding-left: 16px;
-                                                padding-right: 16px;
-                                                alignment: center;
-                                                Text {
-                                                    text: "➕ Добавить в пресеты";
-                                                    font-size: Theme.font_body_sm;
-                                                    font-weight: 700;
-                                                    color: Theme.text_primary;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                            TouchArea {
-                                                clicked => {
-                                                    root.add_dpi_preset(custom_dpi_input.text.to-float());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            ReportRate {
-                                intervals: root.report_rate_intervals;
-                                current: root.report_rate_interval;
-                                busy: root.report_rate_busy;
-                                connected: root.device_connected;
-                                onboard: root.onboard_enabled;
-                                mode-known: root.onboard_known;
-                                select(interval) => { root.set_report_rate(interval); }
-                            }
-
-                            // Slider fine control
-                            VerticalLayout {
-                                spacing: 8px;
-                                HorizontalLayout {
-                                    alignment: space-between;
-                                    Text {
-                                        text: "Плавная регулировка (100 - 25600 DPI, шаг 50):";
-                                        font-size: Theme.font_caption;
-                                        color: Theme.text_secondary;
-                                    }
-                                    Text {
-                                        text: Math.round(dpi-slider.value / 50) * 50 + " DPI";
-                                        font-size: Theme.font_caption;
-                                        font-weight: 700;
-                                        color: Theme.accent;
-                                    }
-                                }
-                                dpi-slider := Slider {
-                                    minimum: 100;
-                                    maximum: 25600;
-                                    value: root.current_dpi;
-                                    released(v) => {
-                                        root.set_dpi(Math.round(v / 50) * 50);
-                                    }
-                                }
-                            }
-                        }
-                        }
-
-                        // ==========================================
-                        // TAB 2: RGB LIGHTSYNC
-                        // ==========================================
-                        if root.active_tab == 2 : ScrollView {
-                        VerticalLayout {
-                            spacing: 18px;
-
-                            Text {
-                                text: "Управление подсветкой LIGHTSYNC RGB";
-                                font-size: 20px;
-                                font-weight: 800;
-                                color: Theme.text_primary;
-                            }
-
-                            // Glowing Preview Card
-                            Rectangle {
-                                height: 110px;
-                                border-radius: 10px;
-                                background: Theme.card_bg_subtle;
-                                border-width: 1px;
-                                border-color: Theme.border_subtle;
-
-                                HorizontalLayout {
-                                    alignment: center;
-                                    spacing: 20px;
-
-                                    Rectangle {
-                                        width: 60px;
-                                        height: 60px;
-                                        border-radius: 30px;
-                                        background: root.current_color;
-                                        border-width: 3px;
-                                        border-color: Theme.swatch_border_unselected;
-
-                                        Text {
-                                            text: "G";
-                                            font-size: 26px;
-                                            font-weight: 900;
-                                            color: Theme.text_primary;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Text {
-                                            text: "Активная зона: Логотип Logitech G";
-                                            font-size: 16px;
-                                            font-weight: 800;
-                                            color: Theme.text_primary;
-                                        }
-                                        Text {
-                                            text: "16.8 миллионов оттенков • Аппаратное сохранение в память мыши";
-                                            font-size: 12px;
-                                            color: Theme.text_secondary;
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Swatches
-                            Text {
-                                text: "Быстрая палитра Logitech G:";
-                                font-size: 13px;
-                                font-weight: 700;
-                                color: Theme.text_white_dim;
-                            }
-
-                            HorizontalLayout {
-                                spacing: 12px;
-                                for s in root.swatches : SwatchButton {
-                                    swatch_color: s.col;
-                                    is_selected: root.current_color == s.col;
-                                    clicked => {
-                                        root.current_color = s.col;
-                                        root.set_rgb_static(s.r, s.g, s.b);
-                                    }
-                                }
-                            }
-
-                            // Dynamic Effects
-                            Text {
-                                text: "Динамические эффекты подсветки:";
-                                font-size: 13px;
-                                font-weight: 700;
-                                color: Theme.text_white_dim;
-                            }
-
-                            HorizontalLayout {
-                                spacing: 12px;
-
-                                Rectangle {
-                                    height: 44px; border-radius: 8px; background: Theme.surface_alt; border-width: 1px; border-color: Theme.border_card;
-                                    HorizontalLayout { alignment: center; Text { text: "🌈 Радужный спектр"; font-size: 13px; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; } }
-                                    TouchArea { clicked => { root.set_rgb_cycle(); } }
-                                }
-                                Rectangle {
-                                    height: 44px; border-radius: 8px; background: Theme.surface_alt; border-width: 1px; border-color: Theme.border_card;
-                                    HorizontalLayout { alignment: center; Text { text: "💨 Пульсация (Дыхание)"; font-size: 13px; font-weight: 700; color: Theme.text_primary; vertical-alignment: center; } }
-                                    TouchArea { clicked => { root.set_rgb_breathe(0, 229, 255); } }
-                                }
-                                Rectangle {
-                                    height: 44px; border-radius: 8px; background: Theme.surface_alt; border-width: 1px; border-color: Theme.border_card;
-                                    HorizontalLayout { alignment: center; Text { text: "⭕ Выключить подсветку"; font-size: 13px; font-weight: 700; color: Theme.error_bright; vertical-alignment: center; } }
-                                    TouchArea { clicked => { root.set_rgb_off(); } }
-                                }
-                            }
-                        }
-                        }
-
-                        // ==========================================
-                        // TAB 3: MACRO STUDIO
-                        // ==========================================
                         if root.active_tab == 3 : ScrollView {
+ x: 76px; y: 108px; width: parent.width - 110px; height: parent.height - 145px;
                         VerticalLayout {
                             spacing: 14px;
 
@@ -1146,423 +675,129 @@ export struct QuickKeyItem {
                         // ==========================================
                         // TAB 4: KEYBINDS & BUTTON MAPPING (VISUAL G502)
                         // ==========================================
-                        if root.active_tab == 4 : HorizontalLayout {
-                            spacing: 18px;
-                            Rectangle {
-                                width: 350px;
-                                background: Theme.card_bg;
-                                border-radius: Theme.radius_lg;
-                                VerticalLayout {
-                                    padding: 16px;
-                                    spacing: 12px;
-                                    Text { text: "Назначения"; color: Theme.text_primary; font-size: Theme.font_title; font-weight: 700; }
-                                    Text { text: "Выберите кнопку мыши на схеме или в списке, чтобы назначить клавишу, DPI или макрос."; color: Theme.text_secondary; font-size: Theme.font_body_sm; wrap: word-wrap; }
-                                    Rectangle {
-                                        height: 36px;
-                                        border-radius: Theme.radius_md;
-                                        background: root.listener_active ? Theme.success_subtle : Theme.surface;
-                                        Text { text: root.listener_active ? "Программные назначения включены" : "Программные назначения выключены"; color: root.listener_active ? Theme.success : Theme.text_secondary; font-size: Theme.font_caption; horizontal-alignment: center; vertical-alignment: center; }
-                                        TouchArea { mouse-cursor: pointer; clicked => { root.toggle_listener(); } }
-                                    }
-                                    IconButton {
-                                        icon: "Студия макросов →";
-                                        btn_width: 200px;
-                                        btn_height: 34px;
-                                        icon_size: 12px;
-                                        clicked => { root.active_tab = 3; }
-                                    }
-                                    ScrollView {
-                                        content-width: self.visible-width;
-                                        horizontal-scrollbar-policy: always-off;
-                                        VerticalLayout {
-                                            spacing: 8px;
-                                            for item in root.keybind_items : KeybindRow {
-                                                button_id: item.button_id;
-                                                button_label: item.button_label;
-                                                default_action: item.default_action;
-                                                assigned_macro: item.assigned_macro;
-                                                assigned_label: item.assigned_label;
-                                                is_mouse: item.is_mouse;
-                                                assign => { root.open_keybind_picker(item.button_id, item.button_label); }
-                                                clear => { root.clear_keybind(item.button_id); }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            VerticalLayout {
-                                spacing: 10px;
-                                Text { text: "G502 HERO"; color: Theme.text_primary; font-size: Theme.font_display; font-weight: 800; }
-                                Text { text: "Выберите кнопку на мыши"; color: Theme.text_secondary; font-size: Theme.font_body; }
-                                MouseMap {
-                                    vertical-stretch: 1;
-                                    select(id) => { root.open_keybind_picker(id, id); }
-                                }
-                                Text { text: "G6–G9: для программных назначений выключите внутреннюю память в профилях."; color: Theme.text_subtle; font-size: Theme.font_caption; wrap: word-wrap; }
-                            }
-                        }
-
-                        if root.active_tab == 6 : AppSettings {
-                            startup-state: root.autostart_state;
-                            startup-error: root.autostart_error;
-                            set-startup(enabled) => { root.set_autostart(enabled); }
-                            app-version: root.app_version;
-                            build-git-hash: root.build_git_hash;
-                            local-sha256: root.local_sha256;
-                            update-status-kind: root.update_status_kind;
-                            update-status-msg: root.update_status_msg;
-                            remote-tag: root.remote_tag;
-                            remote-sha256: root.remote_sha256;
-                            release-url: root.release_url;
-                            check-update => { root.check_for_updates(); }
-                            open-releases => { root.open_releases_page(); }
-                            open-repository => { root.open_github_repo(); }
-                        }
-
-                        // ==========================================
-                        // TAB 5: PROFILES MANAGEMENT
-                        // ==========================================
-                        if root.active_tab == 5 : ScrollView {
-                        VerticalLayout {
-                            spacing: 16px;
-
-                            HorizontalLayout {
-                                alignment: space-between;
-
-                                VerticalLayout {
-                                    spacing: 4px;
-                                    Text {
-                                        text: "Менеджер профилей настроек";
-                                        font-size: 20px;
-                                        font-weight: 800;
-                                        color: Theme.text_primary;
-                                    }
-                                    Text {
-                                        text: "Переключайте конфигурации мыши (DPI, пресеты сенсора, подсветку и макросы) под игры и задачи в 1 клик.";
-                                        font-size: 12px;
-                                        color: Theme.text_secondary;
-                                    }
-                                }
-
-                                HorizontalLayout {
-                                    spacing: 10px;
-
-                                    Rectangle {
-                                        height: 38px;
-                                        border-radius: 6px;
-                                        background: Theme.accent;
-                                        HorizontalLayout {
-                                            padding-left: 14px; padding-right: 14px;
-                                            Text {
-                                                text: "➕ СОЗДАТЬ ПРОФИЛЬ";
-                                                font-size: 12px;
-                                                font-weight: 800;
-                                                color: Theme.app_bg;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                        TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => {
-                                                root.new_profile_name = "Новый игровой профиль";
-                                                root.new_profile_desc = "Кастомный профиль с индивидуальными DPI и макросами";
-                                                root.show_profile_creator = true;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            MemoryControls {
-                                connected: root.device_connected;
-                                known: root.onboard_known;
-                                busy: root.onboard_busy;
-                                onboard: root.onboard_enabled;
-                                g9-locked: root.g9_locked;
-                                buttons-ready: root.hardware_buttons_ready;
-                                slot: root.active_onboard_slot;
-                                change-mode(value) => { root.set_memory_mode(value); }
-                                toggle-g9 => { root.toggle_g9_lock(); }
-                            }
-
-                            // Profiles List Header
-                            Text {
-                                text: "Список пользовательских профилей:";
-                                font-size: 13px;
-                                font-weight: 700;
-                                color: Theme.text_white_dim;
-                            }
-
-                            // Profiles List
-                            VerticalLayout {
-                                spacing: 8px;
-
-                                for item in root.profile_items : ProfileRow {
-                                    id: item.id;
-                                    name: item.name;
-                                    description: item.description;
-                                    dpi_info: item.dpi_info;
-                                    keybinds_count: item.keybinds_count;
-                                    is_active: item.is_active;
-                                    activate => { root.switch_profile(item.id); }
-                                    duplicate => { root.duplicate_profile(item.id); }
-                                    delete => { root.delete_profile(item.id); }
-                                }
-                            }
-                        }
-                        }
-
-                }
-            }
-            } // Close HorizontalLayout (Main Body: Sidebar + Content Canvas)
-
-            // Divider
-            Rectangle {
-                height: 1px;
-                background: Theme.divider;
-            }
-
-            // ==========================================
-            // FOOTER STATUSBAR
-            // ==========================================
-            Rectangle {
-                height: 34px;
-                background: Theme.app_bg;
-
-                HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    alignment: space-between;
-
-                    Text {
-                        text: "Статус: " + root.status_msg;
-                        font-size: 12px;
-                        font-weight: 600;
-                        color: Theme.text_secondary;
-                        vertical-alignment: center;
-                    }
-
-                }
-            }
-        } // Close root VerticalLayout (Header + Main Body + Footer)
 
         // ==========================================
         // MODAL OVERLAY: MACRO CREATOR & EDITOR
         // ==========================================
         if root.show_macro_builder : Rectangle {
-            width: 100%;
-            height: 100%;
-            background: Theme.overlay;
-
-            TouchArea { /* block clicks outside modal */ }
-
-            HorizontalLayout {
-                alignment: center;
-                VerticalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 740px;
-                        height: 620px;
-                        border-radius: 12px;
-                        background: Theme.card_bg_subtle;
-                        border-width: 1px;
-                        border-color: Theme.border_default;
-
-                VerticalLayout {
-                    padding: 22px;
-                    spacing: 12px;
-
-                    // Header
-                    HorizontalLayout {
-                        alignment: space-between;
-                        VerticalLayout {
-                            spacing: 2px;
-                            Text {
-                                text: root.builder_editing_original != "" ? "✏️ Редактирование макроса" : "➕ Конструктор нового макроса";
-                                font-size: 17px;
-                                font-weight: 800;
-                                color: Theme.text_primary;
-                            }
-                            Text {
-                                text: root.builder_editing_original != "" ? ("Редактирование: " + root.builder_editing_original) : "Создайте автокликер или последовательность клавиш с задержками";
-                                font-size: 11px;
-                                color: Theme.text_muted;
-                            }
-                        }
-
-                        Rectangle {
-                            width: 28px; height: 28px; border-radius: 6px; background: Theme.surface_elevated;
-                            Text { text: "✕"; font-size: 12px; font-weight: 800; color: Theme.text_primary; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { root.close_macro_builder(); } }
-                        }
+            x: 0px; y: 0px; width: 100%; height: 100%; background: #090a0c;
+            TouchArea { }
+            recorder := FocusScope {
+                key-pressed(event) => {
+                    if root.builder_recording {
+                        if !event.repeat { root.builder_capture_key(event.text, true); }
+                        accept
+                    } else { reject }
+                }
+                key-released(event) => {
+                    if root.builder_recording { root.builder_capture_key(event.text, false); accept } else { reject }
+                }
+            }
+            VerticalLayout {
+                padding: 32px; spacing: 18px;
+                HorizontalLayout { spacing: 16px;
+                    HubButton { text: "←"; width: 42px; font-size: 26px; clicked => { root.builder_confirm_close = true; } }
+                    LineEdit { text <=> root.builder_name; placeholder-text: "Название макроса"; }
+                    Text { text: root.builder_editing_original == "" ? "НОВЫЙ МАКРОС" : "РЕДАКТИРОВАНИЕ"; color: #92979d; font-size: 12px; vertical-alignment: center; }
+                }
+                HorizontalLayout { spacing: 12px;
+                    for title[index] in ["→  Не повторять", "При удержании", "Переключение", "Последовательность"] : HubButton {
+                        text: title; active: root.builder_mode == index; outlined: true; height: 48px;
+                        clicked => { root.builder_set_phase(1); root.builder_mode = index; root.builder_is_toggle = index == 2; }
                     }
-
-                    // Name Input & Mode in Row
-                    HorizontalLayout {
-                        spacing: 16px;
-
-                        VerticalLayout {
-                            spacing: 4px;
-                            width: 320px;
-                            Text { text: "Название макроса:"; font-size: 11px; font-weight: 700; color: Theme.text_white_dim; }
-                            LineEdit {
-                                text: root.builder_name;
-                                edited(val) => { root.builder_name = val; }
-                            }
-                        }
-
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Режим выполнения:"; font-size: 11px; font-weight: 700; color: Theme.text_white_dim; }
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Rectangle {
-                                    height: 34px; border-radius: 6px;
-                                    background: root.builder_is_toggle ? Theme.accent : Theme.surface_alt;
-                                    border-width: 1px; border-color: root.builder_is_toggle ? Theme.accent : Theme.border_btn_hover;
-                                    HorizontalLayout { padding-left: 10px; padding-right: 10px; alignment: center; Text { text: "🔄 Автокликер (Toggle)"; font-size: 11px; font-weight: 800; color: root.builder_is_toggle ? Theme.app_bg : Theme.text_white_dim; vertical-alignment: center; } }
-                                    TouchArea { clicked => { root.builder_is_toggle = true; } }
-                                }
-                                Rectangle {
-                                    height: 34px; border-radius: 6px;
-                                    background: !root.builder_is_toggle ? Theme.success : Theme.surface_alt;
-                                    border-width: 1px; border-color: !root.builder_is_toggle ? Theme.success : Theme.border_btn_hover;
-                                    HorizontalLayout { padding-left: 10px; padding-right: 10px; alignment: center; Text { text: "⚡ Одиночный (Sequence)"; font-size: 11px; font-weight: 800; color: !root.builder_is_toggle ? Theme.app_bg : Theme.text_white_dim; vertical-alignment: center; } }
-                                    TouchArea { clicked => { root.builder_is_toggle = false; } }
-                                }
-                            }
-                        }
+                }
+                Text { text: root.builder_mode == 0 ? "Один полный проход после нажатия назначенной кнопки."
+                    : root.builder_mode == 1 ? "Повторяется, пока назначенная кнопка зажата. Отпускание завершает повтор и освобождает клавиши."
+                    : root.builder_mode == 2 ? "Первое нажатие запускает повтор; следующее нажатие его останавливает."
+                    : "При нажатии → повтор при удержании → при отпускании. Каждый участок редактируется отдельно.";
+                    color: #a6abb1; font-size: 13px; wrap: word-wrap; }
+                HorizontalLayout { spacing: 16px; alignment: start;
+                    CheckBox { text: "Стандартная задержка между событиями"; checked <=> root.builder_standard_delay; toggled => { root.builder_refresh_timing(); } }
+                    LineEdit { width: 90px; text <=> root.builder_default_delay; placeholder-text: "50"; edited => { root.builder_refresh_timing(); } }
+                    Text { text: "мс"; color: white; vertical-alignment: center; }
+                    Text { text: root.builder_standard_delay ? "Явные паузы сохраняются отдельно" : "Используются записанные и заданные паузы"; color: #92979d; vertical-alignment: center; font-size: 12px; }
+                }
+                if root.builder_mode == 3 : HorizontalLayout { spacing: 10px;
+                    for title[index] in ["ПРИ НАЖАТИИ", "ПРИ УДЕРЖАНИИ", "ПРИ ОТПУСКАНИИ"] : HubButton {
+                        text: title + "  ·  " + root.builder_phase_counts[index]; active: root.builder_phase == index; outlined: true;
+                        clicked => { root.builder_set_phase(index); }
                     }
-
-                    // Action Builder Palettes
-                    VerticalLayout {
-                        spacing: 8px;
-
-                        // Mouse Buttons
-                        Text { text: "🖱️ Добавить действия мыши (ЛКМ, ПКМ, СКМ, G4, G5):"; font-size: 11px; font-weight: 700; color: Theme.accent; }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Rectangle {
-                                height: 28px; border-radius: 5px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                HorizontalLayout { padding-left: 8px; padding-right: 8px; Text { text: "+ ЛКМ Клик"; font-size: 11px; font-weight: 700; color: Theme.accent; vertical-alignment: center; } }
-                                TouchArea { clicked => { root.builder_add_mouse(1, true, 15); root.builder_add_mouse(1, false, 15); } }
-                            }
-                            Rectangle {
-                                height: 28px; border-radius: 5px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                HorizontalLayout { padding-left: 8px; padding-right: 8px; Text { text: "+ ПКМ Клик"; font-size: 11px; font-weight: 700; color: Theme.accent; vertical-alignment: center; } }
-                                TouchArea { clicked => { root.builder_add_mouse(2, true, 15); root.builder_add_mouse(2, false, 15); } }
-                            }
-                            Rectangle {
-                                height: 28px; border-radius: 5px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                HorizontalLayout { padding-left: 8px; padding-right: 8px; Text { text: "+ СКМ Клик"; font-size: 11px; font-weight: 700; color: Theme.accent; vertical-alignment: center; } }
-                                TouchArea { clicked => { root.builder_add_mouse(3, true, 15); root.builder_add_mouse(3, false, 15); } }
-                            }
-                            Rectangle {
-                                height: 28px; border-radius: 5px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                HorizontalLayout { padding-left: 8px; padding-right: 8px; Text { text: "+ Боковая G4"; font-size: 11px; font-weight: 700; color: Theme.accent; vertical-alignment: center; } }
-                                TouchArea { clicked => { root.builder_add_mouse(4, true, 15); root.builder_add_mouse(4, false, 15); } }
-                            }
-                            Rectangle {
-                                height: 28px; border-radius: 5px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                HorizontalLayout { padding-left: 8px; padding-right: 8px; Text { text: "+ Боковая G5"; font-size: 11px; font-weight: 700; color: Theme.accent; vertical-alignment: center; } }
-                                TouchArea { clicked => { root.builder_add_mouse(5, true, 15); root.builder_add_mouse(5, false, 15); } }
-                            }
-                            Rectangle {
-                                height: 28px; border-radius: 5px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                HorizontalLayout { padding-left: 8px; padding-right: 8px; Text { text: "+ Зажать ЛКМ"; font-size: 10px; font-weight: 700; color: Theme.purple_text; vertical-alignment: center; } }
-                                TouchArea { clicked => { root.builder_add_mouse(1, true, 10); } }
-                            }
-                            Rectangle {
-                                height: 28px; border-radius: 5px; background: Theme.surface_btn; border-width: 1px; border-color: Theme.border_btn_hover;
-                                HorizontalLayout { padding-left: 8px; padding-right: 8px; Text { text: "+ Отпустить ЛКМ"; font-size: 10px; font-weight: 700; color: Theme.purple_text; vertical-alignment: center; } }
-                                TouchArea { clicked => { root.builder_add_mouse(1, false, 10); } }
-                            }
+                }
+                ScrollView {
+                    vertical-stretch: 1; min-height: 150px;
+                    HorizontalLayout { padding: 12px; spacing: 12px; alignment: start;
+                        for step[index] in root.builder_steps : Rectangle {
+                            width: 170px; height: 145px; border-radius: 9px; background: #202327;
+                            border-width: 1px; border-color: root.builder_selected_step == index ? Theme.accent : #40454b;
+                            Text { x: 14px; y: 12px; text: "" + (index + 1); color: #92979d; font-size: 11px; }
+                            Text { x: 14px; y: 34px; width: parent.width - 28px; height: 92px; text: step; color: white; font-size: 15px; wrap: word-wrap; }
+                            TouchArea { mouse-cursor: pointer; clicked => { root.builder_select_step(index); } }
                         }
-
-                        // Keyboard Keys
-                        Text { text: "⌨️ Добавить клавиши клавиатуры:"; font-size: 11px; font-weight: 700; color: Theme.success; }
-                        HorizontalLayout {
-                            spacing: 5px;
-                            for k in root.quick_keys : QuickKeyButton {
-                                label: k.label;
-                                vk: k.vk;
-                                clicked(code) => {
-                                    root.builder_add_key(code, true, 10);
-                                    root.builder_add_key(code, false, 10);
-                                }
-                            }
-                        }
-
-                        // Delays & Controls
-                        Text { text: "⏱️ Паузы и управление цепочкой:"; font-size: 11px; font-weight: 700; color: Theme.warning; }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            for d in root.quick_delays : QuickDelayButton {
-                                delay_ms: d;
-                                clicked(ms) => {
-                                    root.builder_add_delay(ms);
-                                }
-                            }
-
-                            // Clear all button
-                            Rectangle {
-                                height: 26px; border-radius: 4px; background: Theme.error_btn_bg; border-width: 1px; border-color: Theme.error_border;
-                                HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Очистить все"; font-size: 10px; font-weight: 700; color: Theme.error_bright; vertical-alignment: center; } }
-                                TouchArea { clicked => { root.builder_clear_steps(); } }
-                            }
-                        }
-                    }
-
-                    // Steps sequence preview
-                    VerticalLayout {
-                        spacing: 4px;
-                        Text { text: "Цепочка действий макроса (" + root.builder_steps.length + " шагов):"; font-size: 11px; font-weight: 700; color: Theme.text_white_dim; }
-
-                        ScrollView {
-                            height: root.builder_error == "" ? 160px : 100px;
-                            VerticalLayout {
-                                spacing: 4px;
-                                for step[idx] in root.builder_steps : StepRow {
-                                    idx: idx;
-                                    step_text: step;
-                                    move_up => { root.builder_move_step_up(idx); }
-                                    move_down => { root.builder_move_step_down(idx); }
-                                    remove => { root.builder_remove_step(idx); }
-                                }
-                            }
-                        }
-                    }
-
-                    if root.builder_error != "" : ScrollView {
-                        height: 48px;
-                        Text {
-                            text: root.builder_error;
-                            color: Theme.error_text;
-                            font-size: 11px;
-                            wrap: word-wrap;
-                        }
-                    }
-
-                    // Actions
-                    HorizontalLayout {
-                        spacing: 12px;
-                        alignment: end;
-
-                        Rectangle {
-                            height: 38px; border-radius: 6px; background: Theme.surface_elevated;
-                            HorizontalLayout { padding-left: 16px; padding-right: 16px; Text { text: "Отмена"; font-size: 12px; font-weight: 700; color: Theme.text_secondary; vertical-alignment: center; } }
-                            TouchArea { clicked => { root.close_macro_builder(); } }
-                        }
-
-                        Rectangle {
-                            height: 38px; border-radius: 6px; background: Theme.success;
-                            HorizontalLayout { padding-left: 18px; padding-right: 18px; Text { text: "💾 СОХРАНИТЬ МАКРОС"; font-size: 12px; font-weight: 800; color: Theme.app_bg; vertical-alignment: center; } }
-                            TouchArea { clicked => { root.builder_save_macro(root.builder_editing_original, root.builder_name, root.builder_is_toggle); } }
+                        if root.builder_steps.length == 0 : Rectangle {
+                            width: 500px; height: 145px; border-radius: 9px; border-width: 1px; border-color: #363b42;
+                            Text { text: "Добавьте события ниже или начните запись.\nНажатие, отпускание и пауза — отдельные шаги."; color: #92979d; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; }
                         }
                     }
                 }
+                if root.builder_selected_step >= 0 : HorizontalLayout { spacing: 8px;
+                    Text { text: "Шаг " + (root.builder_selected_step + 1); color: white; vertical-alignment: center; width: 90px; }
+                    HubButton { text: "← Раньше"; outlined: true; clicked => { root.builder_move_step_up(root.builder_selected_step); } }
+                    HubButton { text: "Позже →"; outlined: true; clicked => { root.builder_move_step_down(root.builder_selected_step); } }
+                    HubButton { text: "Удалить шаг"; outlined: true; clicked => { root.builder_remove_step(root.builder_selected_step); } }
+                    LineEdit { width: 95px; text <=> root.builder_delay_input; }
+                    HubButton { text: "Пауза после / изменить, мс"; outlined: true; clicked => { root.builder_update_delay(root.builder_selected_step, root.builder_delay_input); } }
+                }
+                if !root.builder_recording : VerticalLayout { spacing: 10px;
+                    HorizontalLayout { spacing: 8px;
+                        Text { text: "МЫШЬ"; width: 80px; color: #92979d; font-size: 12px; vertical-alignment: center; }
+                        for title[index] in ["ЛКМ", "ПКМ", "СКМ", "Назад", "Вперёд"] : HubButton {
+                            text: "+ " + title; outlined: true;
+                            clicked => { root.builder_add_mouse(index + 1, true, 0); root.builder_add_mouse(index + 1, false, 0); }
+                        }
+                        HubButton { text: "ЛКМ ↓"; outlined: true; clicked => { root.builder_add_mouse(1,true,0); } }
+                        HubButton { text: "ЛКМ ↑"; outlined: true; clicked => { root.builder_add_mouse(1,false,0); } }
+                    }
+                    HorizontalLayout { spacing: 8px;
+                        LineEdit { text <=> root.builder_key_input; placeholder-text: "A, Space, Ctrl+Shift+A…"; }
+                        HubButton { text: "+ Сочетание"; outlined: true; clicked => { root.builder_add_chord(root.builder_key_input, 0); } }
+                        HubButton { text: "↓ Нажать"; outlined: true; clicked => { root.builder_add_chord(root.builder_key_input, 1); } }
+                        HubButton { text: "↑ Отпустить"; outlined: true; clicked => { root.builder_add_chord(root.builder_key_input, 2); } }
+                        LineEdit { width: 100px; text <=> root.builder_delay_input; placeholder-text: "50"; }
+                        HubButton { text: "+ Пауза, мс"; outlined: true; clicked => { root.builder_insert_delay(root.builder_delay_input); } }
+                    }
+                }
+                if root.builder_recording : Rectangle {
+                    height: 95px; background: #271b22; border-radius: 8px; border-width: 1px; border-color: #ed3a68;
+                    Text { text: "ЗАПИСЬ · Нажимайте клавиши; кликайте в этой зоне для записи мыши.\nEsc или «Остановить запись» завершает запись. Запись действует внутри этого окна."; color: white; horizontal-alignment: center; vertical-alignment: center; font-size: 13px; }
+                    TouchArea {
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.down || event.kind == PointerEventKind.up {
+                                root.builder_capture_mouse(event.button == PointerEventButton.left ? 1 : event.button == PointerEventButton.right ? 2 : event.button == PointerEventButton.middle ? 3 : event.button == PointerEventButton.back ? 4 : event.button == PointerEventButton.forward ? 5 : 0, event.kind == PointerEventKind.down);
+                            }
+                        }
+                        clicked => { recorder.focus(); }
+                    }
+                }
+                Text { visible: root.builder_error != ""; text: root.builder_error; color: #ff8ca5; font-size: 13px; wrap: word-wrap; }
+                HorizontalLayout { spacing: 12px;
+                    HubButton { text: root.builder_recording ? "■ Остановить запись" : "● Начать запись"; outlined: true; clicked => { root.builder_toggle_recording(); if root.builder_recording { recorder.focus(); } } }
+                    HubButton { text: "Очистить участок"; outlined: true; clicked => { root.builder_clear_steps(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    HubButton { text: "Отмена"; width: 110px; clicked => { root.builder_confirm_close = true; } }
+                    HubButton { text: "СОХРАНИТЬ"; width: 200px; filled: true; clicked => { root.builder_save_macro(root.builder_editing_original, root.builder_name, root.builder_mode == 2); } }
+                }
             }
-            }
+            if root.builder_confirm_close : Rectangle {
+                width: 100%; height: 100%; background: #000000cc; TouchArea { }
+                Rectangle { width: 430px; height: 180px; background: #23262b; border-radius: 12px;
+                    VerticalLayout { padding: 24px; spacing: 20px;
+                        Text { text: "Закрыть редактор без сохранения?"; color: white; font-size: 18px; wrap: word-wrap; }
+                        HorizontalLayout { spacing: 12px;
+                            HubButton { text: "Продолжить"; outlined: true; clicked => { root.builder_confirm_close = false; } }
+                            HubButton { text: "Не сохранять"; outlined: true; clicked => { root.builder_confirm_close = false; root.close_macro_builder(); } }
+                        }
+                    }
+                }
             }
         }
 

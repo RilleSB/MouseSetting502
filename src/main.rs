@@ -370,7 +370,7 @@ fn main() {
                 LedZone::Logo,
                 LedEffect::ColorCycle {
                     period_ms: 10000,
-                    brightness: 255,
+                    brightness: 100,
                 },
                 false,
             ) {
@@ -399,6 +399,7 @@ fn main() {
                     g,
                     b,
                     period_ms: 3000,
+                    brightness: 100,
                 },
                 false,
             ) {

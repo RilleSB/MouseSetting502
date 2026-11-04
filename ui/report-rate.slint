@@ -38,7 +38,7 @@ export component ReportRate inherits Rectangle {
             alignment: start;
             spacing: 8px;
             for interval in root.intervals : Rectangle {
-                width: 90px;
+                width: (parent.width - max(0, root.intervals.length - 1) * 8px) / max(1, root.intervals.length);
                 height: 34px;
                 border-radius: Theme.radius_md;
                 background: root.current == interval ? Theme.accent : Theme.surface_alt;

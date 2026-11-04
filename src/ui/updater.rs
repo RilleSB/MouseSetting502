@@ -128,6 +128,10 @@ fn parse_release(
 }
 
 fn fetch_releases_json() -> Result<Vec<u8>, String> {
+    fetch_github_json(RELEASES_API_URL)
+}
+
+pub(super) fn fetch_github_json(url: &str) -> Result<Vec<u8>, String> {
     // 1. Try curl.exe with CREATE_NO_WINDOW
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -151,7 +155,7 @@ fn fetch_releases_json() -> Result<Vec<u8>, String> {
         "User-Agent: MouseSetting502",
         "-H",
         "Accept: application/vnd.github+json",
-        RELEASES_API_URL,
+        url,
     ]);
 
     if let Ok(output) = cmd.output()
@@ -173,7 +177,7 @@ fn fetch_releases_json() -> Result<Vec<u8>, String> {
         "-NonInteractive",
         "-Command",
         &format!(
-            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $ErrorActionPreference = 'Stop'; (Invoke-RestMethod -Uri '{RELEASES_API_URL}' -TimeoutSec 20 -Headers @{{'User-Agent'='MouseSetting502';'Accept'='application/vnd.github+json'}}) | ConvertTo-Json -Compress -Depth 6"
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject (Invoke-RestMethod -Uri '{url}' -TimeoutSec 20 -Headers @{{'User-Agent'='MouseSetting502';'Accept'='application/vnd.github+json'}}) -Compress -Depth 6"
         ),
     ]);
 

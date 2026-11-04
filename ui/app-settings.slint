@@ -2,10 +2,11 @@ import { Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export component AppSettings inherits Rectangle {
-    // -1: unavailable, 0: off, 1: this executable, 2: another copy, 3: occupied.
+    // -1: unavailable, 0: off, 1: this executable, 2: another copy, 3: occupied, 4: disabled by Windows.
     in property <int> startup-state: -1;
     in property <string> startup-error: "";
     callback set-startup(bool);
+    callback refresh-startup();
 
     // Update checker & build verification
     in property <string> app-version: "1.0.0";
@@ -63,6 +64,7 @@ export component AppSettings inherits Rectangle {
                         text: root.startup-state == 1 ? "Включена для этого файла приложения."
                             : root.startup-state == 2 ? "Включена для другой копии приложения."
                             : root.startup-state == 3 ? "Имя записи занято другой программой."
+                            : root.startup-state == 4 ? "Запись сохранена, но автозагрузка отключена в Windows. Включите MouseSettings502 в Диспетчере задач → Автозагрузка приложений."
                             : root.startup-state == 0 ? "Выключена."
                             : "Не удалось прочитать состояние автозагрузки.";
                         color: root.startup-state == 1 ? Theme.success : Theme.text_secondary;
@@ -108,7 +110,16 @@ export component AppSettings inherits Rectangle {
                             }
                         }
 
-                        if root.startup-state == 2 : Rectangle {
+                        Rectangle {
+                            height: 36px; border-radius: Theme.radius_md; background: Theme.surface_btn;
+                            HorizontalLayout {
+                                padding-left: 14px; padding-right: 14px;
+                                Text { text: "Обновить состояние"; color: Theme.text_primary; font-size: Theme.font_body_sm; vertical-alignment: center; }
+                            }
+                            TouchArea { mouse-cursor: pointer; clicked => { root.refresh-startup(); } }
+                        }
+
+                        if root.startup-state == 2 || root.startup-state == 4 : Rectangle {
                             height: 36px;
                             border-radius: Theme.radius_md;
                             background: Theme.surface_btn;

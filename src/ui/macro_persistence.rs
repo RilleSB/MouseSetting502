@@ -188,6 +188,7 @@ mod tests {
 
     fn data(name: &str) -> LgMacro {
         LgMacro {
+            playback: None,
             name: name.into(),
             action_name: Some(name.into()),
             macro_type: "toggle".into(),
@@ -302,6 +303,7 @@ mod tests {
         let (_dir, state, active_id) = fixture();
         let mut edited = data("Old");
         edited.sequence.push(crate::lghub::LgMacroComponent {
+            explicit_delay: false,
             mouse_button: None,
             mouse_down: None,
             vk_code: None,

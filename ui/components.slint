@@ -259,7 +259,7 @@ export component MacroRow inherits Rectangle {
                             padding-left: 6px; padding-right: 6px;
                             alignment: center;
                             Text {
-                                text: root.is_toggle ? "АВТОКЛИКЕР (TOGGLE)" : "СЕКВЕНЦИЯ";
+                                text: root.macro_type;
                                 font-size: Theme.font_xs;
                                 font-weight: 700;
                                 color: root.is_toggle ? Theme.warning : Theme.accent_secondary;

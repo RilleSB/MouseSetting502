@@ -1,6 +1,7 @@
 mod autostart;
 mod binding_persistence;
 pub mod bridge;
+mod community;
 mod device_connection;
 mod device_runtime;
 pub mod device_worker;
@@ -8,6 +9,7 @@ mod dpi_controller;
 pub mod keybind_controller;
 mod lifecycle;
 pub mod macro_controller;
+mod macro_draft;
 mod macro_persistence;
 pub mod models;
 pub mod profile_controller;
@@ -42,6 +44,9 @@ pub fn run() {
         }
     };
 
+    app.on_search_matches(|text, query| text.to_lowercase().contains(&query.to_lowercase()));
+    community::setup(&app);
+
     let tray = match tray::TrayIntegration::new(&app) {
         Ok(tray) => Some(tray),
         Err(error) => {
@@ -58,6 +63,7 @@ pub fn run() {
             autostart::StartupState::Current => 1,
             autostart::StartupState::OtherCopy => 2,
             autostart::StartupState::Occupied => 3,
+            autostart::StartupState::BlockedByWindows => 4,
         }
     }
     match autostart::state() {
@@ -67,6 +73,21 @@ pub fn run() {
             app.set_autostart_error(error.into());
         }
     }
+    let refresh_startup_weak = app.as_weak();
+    app.on_refresh_autostart(move || {
+        if let Some(app) = refresh_startup_weak.upgrade() {
+            match autostart::state() {
+                Ok(state) => {
+                    app.set_autostart_state(startup_number(state));
+                    app.set_autostart_error("".into());
+                }
+                Err(error) => {
+                    app.set_autostart_state(-1);
+                    app.set_autostart_error(error.into());
+                }
+            }
+        }
+    });
     let startup_weak = app.as_weak();
     app.on_set_autostart(move |enabled| {
         if let Some(app) = startup_weak.upgrade() {
@@ -75,7 +96,9 @@ pub fn run() {
                     app.set_autostart_state(startup_number(state));
                     app.set_autostart_error("".into());
                     app.set_status_msg(
-                        if enabled {
+                        if state == autostart::StartupState::BlockedByWindows {
+                            "Запись сохранена, но автозагрузка отключена в Windows"
+                        } else if enabled {
                             "Автозагрузка включена"
                         } else {
                             "Автозагрузка выключена"
@@ -98,11 +121,19 @@ pub fn run() {
     // Updater & Repository integration
     app.set_app_version(updater::APP_VERSION.into());
     app.set_build_git_hash(updater::BUILD_GIT_HASH.into());
-    if let Ok(hash) = updater::current_executable_hash() {
-        app.set_local_sha256(hash.into());
-    } else {
-        app.set_local_sha256("не удалось вычислить".into());
-    }
+    // Debug executables can be hundreds of MB. Hashing them on the UI thread
+    // prevented the first window from appearing for tens of seconds.
+    app.set_local_sha256("Вычисляется…".into());
+    let hash_weak = app.as_weak();
+    std::thread::spawn(move || {
+        let hash =
+            updater::current_executable_hash().unwrap_or_else(|_| "не удалось вычислить".into());
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(app) = hash_weak.upgrade() {
+                app.set_local_sha256(hash.into());
+            }
+        });
+    });
 
     let updater_weak = app.as_weak();
     app.on_check_for_updates(move || {

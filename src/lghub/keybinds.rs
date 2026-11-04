@@ -267,7 +267,7 @@ pub fn rename_assigned_macro(
 #[cfg(windows)]
 struct HookState {
     bindings: Arc<RwLock<Vec<ButtonBinding>>>,
-    trigger_tx: std::sync::mpsc::Sender<(String, u64)>,
+    trigger_tx: std::sync::mpsc::Sender<(String, u64, bool, String)>,
     panic_tx: std::sync::mpsc::Sender<u64>,
     actions: Arc<Mutex<ButtonActions>>,
     running: Arc<AtomicBool>,
@@ -310,7 +310,9 @@ fn check_and_dispatch_button(btn_id: &str, down: bool) -> bool {
         send_key_event(vk, pressed);
     }
     if let Some(action) = event.action {
-        let _ = state.trigger_tx.send((action, generation));
+        let _ = state
+            .trigger_tx
+            .send((action, generation, down, btn_id.to_string()));
     }
     event.suppress
 }
@@ -438,7 +440,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
 }
 
-type CallbackFn = Arc<dyn Fn(String, u64) + Send + Sync + 'static>;
+type CallbackFn = Arc<dyn Fn(String, u64, bool, String) + Send + Sync + 'static>;
 type PanicFn = Arc<dyn Fn() + Send + Sync + 'static>;
 
 /// Active background listener for global key and mouse button triggers
@@ -451,6 +453,7 @@ pub struct KeybindListener {
     bindings: Arc<RwLock<Vec<ButtonBinding>>>,
     callback: Arc<RwLock<Option<CallbackFn>>>,
     panic_callback: Arc<RwLock<Option<PanicFn>>>,
+    context_cancel: RwLock<Option<PanicFn>>,
 }
 
 impl KeybindListener {
@@ -464,6 +467,7 @@ impl KeybindListener {
             bindings: Arc::new(RwLock::new(initial_bindings)),
             callback: Arc::new(RwLock::new(None)),
             panic_callback: Arc::new(RwLock::new(None)),
+            context_cancel: RwLock::new(None),
         }
     }
 
@@ -476,6 +480,17 @@ impl KeybindListener {
         }
     }
 
+    /// Device loss and context changes cannot leave a held-trigger macro running.
+    pub fn set_context_cancel<F>(&self, callback: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        *self
+            .context_cancel
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(callback));
+    }
+
     pub fn set_callback<F>(&self, callback: F)
     where
         F: Fn(String) + Send + Sync + 'static,
@@ -483,9 +498,21 @@ impl KeybindListener {
         self.set_event_callback(move |name, _| callback(name));
     }
 
+    /// Compatibility subscription: only activation edges are delivered.
     pub fn set_event_callback<F>(&self, callback: F)
     where
         F: Fn(String, u64) + Send + Sync + 'static,
+    {
+        self.set_transition_callback(move |name, generation, down, _| {
+            if down {
+                callback(name, generation);
+            }
+        });
+    }
+
+    pub fn set_transition_callback<F>(&self, callback: F)
+    where
+        F: Fn(String, u64, bool, String) + Send + Sync + 'static,
     {
         if let Ok(mut lock) = self.callback.write() {
             *lock = Some(Arc::new(callback));
@@ -540,7 +567,7 @@ impl KeybindListener {
             && let Ok(callback) = self.callback.read()
             && let Some(callback) = callback.as_ref()
         {
-            callback(action, generation);
+            callback(action, generation, down, button.to_string());
         }
     }
 
@@ -549,6 +576,15 @@ impl KeybindListener {
         let mut state = self.actions.lock().unwrap_or_else(|e| e.into_inner());
         for (vk, down) in state.release_all() {
             send_key_event(vk, down);
+        }
+        drop(state);
+        let cancel = self
+            .context_cancel
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(cancel) = cancel {
+            cancel();
         }
     }
 
@@ -609,7 +645,11 @@ impl KeybindListener {
     where
         F: Fn(String) + Send + Sync + 'static,
     {
-        let cb_arc: CallbackFn = Arc::new(move |name, _| callback(name));
+        let cb_arc: CallbackFn = Arc::new(move |name, _, down, _| {
+            if down {
+                callback(name);
+            }
+        });
         if let Ok(mut lock) = self.callback.write() {
             *lock = Some(cb_arc.clone());
         }
@@ -631,16 +671,16 @@ impl KeybindListener {
 
         #[cfg(windows)]
         {
-            let (tx, rx) = std::sync::mpsc::channel::<(String, u64)>();
+            let (tx, rx) = std::sync::mpsc::channel::<(String, u64, bool, String)>();
             let (panic_tx, panic_rx) = std::sync::mpsc::channel::<u64>();
 
             // Single dedicated worker thread for triggered macros (Item 9)
             let cb_worker = callback.clone();
             let worker_generation = event_generation.clone();
             thread::spawn(move || {
-                while let Ok((macro_name, generation)) = rx.recv() {
+                while let Ok((macro_name, generation, down, source)) = rx.recv() {
                     if worker_generation.load(Ordering::SeqCst) == generation {
-                        cb_worker(macro_name, generation);
+                        cb_worker(macro_name, generation, down, source);
                     }
                 }
             });
@@ -787,6 +827,28 @@ impl KeybindListener {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transition_subscription_delivers_release_with_original_action_and_source() {
+        let listener = KeybindListener::new(default_bindings());
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let output = received.clone();
+        listener.set_transition_callback(move |name, _, down, source| {
+            output.lock().unwrap().push((name, down, source))
+        });
+        listener.running.store(true, Ordering::SeqCst);
+        listener.hardware_button("G6", true, "original");
+        listener.hardware_button("G6", true, "repeat");
+        listener.hardware_button("G6", false, "changed");
+        assert_eq!(
+            *received.lock().unwrap(),
+            vec![
+                ("original".into(), true, "G6".into()),
+                ("original".into(), false, "G6".into())
+            ]
+        );
+        listener.stop();
+    }
 
     #[test]
     fn hardware_events_keep_their_generation_and_context_changes_invalidate_them() {

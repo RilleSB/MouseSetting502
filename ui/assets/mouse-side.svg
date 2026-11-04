@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="158" height="410" viewBox="0 0 158 410">
+  <title>Original eleven-button gaming mouse — thumb-side view</title>
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#525b63"/><stop offset=".5" stop-color="#262e35"/><stop offset="1" stop-color="#10171c"/></linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#68727b"/><stop offset=".35" stop-color="#3d474f"/><stop offset="1" stop-color="#1d252c"/></linearGradient>
+    <linearGradient id="grip" x1="0" y1="0" x2="1" y2=".5"><stop stop-color="#303a42"/><stop offset="1" stop-color="#151e25"/></linearGradient>
+    <linearGradient id="button" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#68757f"/><stop offset="1" stop-color="#2d3943"/></linearGradient>
+    <pattern id="texture" width="10" height="13" patternUnits="userSpaceOnUse"><path d="m1 1 4 4-4 4" fill="none" stroke="#8b9aa6" stroke-opacity=".14"/></pattern>
+  </defs>
+  <path d="m58 0 4 58" stroke="#10171c" stroke-width="7"/>
+  <path d="m58 0 4 58" stroke="#3a454e" stroke-width="2"/>
+  <path d="m56 43 12-2 5 27-14 2Z" fill="#182229" stroke="#46545e"/>
+  <path d="m58 50 11-2m-10 8 11-2" stroke="#67747e" stroke-width="1.5"/>
+  <!-- Oblique shell, drawn specifically for a clear three-button thumb view. -->
+  <path d="m69 61 20 24q31 39 45 96l16 96q7 39-10 69-18 33-47 50L73 386l-7-39-30-38q-23-39-20-82 1-51 17-94 16-46 36-72Z" fill="url(#shell)" stroke="#596772" stroke-width="1"/>
+  <path d="m70 65 18 24q27 35 41 88l8 40-22 10-20-71-34-70Z" fill="url(#cap)" stroke="#15212a" stroke-width="1.5"/>
+  <path d="m68 72 29 71 18 80-14 10-25-82-25-55Z" fill="#151f27" stroke="#54626d" stroke-width=".7"/>
+  <path d="m90 98 20 39-1 25-12-24Z" fill="#0e171e" stroke="#63717b"/>
+  <path d="m96 113 8 17m-7-9 8 17m-6-9 7 17" stroke="#9ba7ae" stroke-width="2"/>
+  <!-- Shoulder switches. -->
+  <path d="m101 166 8 17 3 25-8-13Z" fill="url(#button)" stroke="#0d1720" stroke-width="1.5"/>
+  <path d="m109 207 6 17 3 20-8-13Z" fill="url(#button)" stroke="#0d1720" stroke-width="1.5"/>
+  <!-- Thumb panel with original directional texture. -->
+  <path d="m40 153 29-20 23 54 22 83-23 55-26 12-30-35q-21-32-16-76 3-44 21-73Z" fill="url(#grip)" stroke="#677783" stroke-width=".8"/>
+  <path d="m31 218 42-28 22 85-19 45-35-22q-15-27-14-54Z" fill="url(#texture)"/>
+  <!-- G6, G5 and G4: three separately outlined thumb switches. -->
+  <path d="m38 171 18-17 6 26-20 18Z" fill="url(#button)" stroke="#0b151e" stroke-width="2"/>
+  <path d="m64 179 19-15 14 53-19 14Z" fill="url(#button)" stroke="#0b151e" stroke-width="2"/>
+  <path d="m80 237 19-13 12 50-20 17Z" fill="url(#button)" stroke="#0b151e" stroke-width="2"/>
+  <path d="m45 176 7-6m24 24 9-6m6 66 9-6" stroke="#b4c1ca" stroke-opacity=".65" stroke-width="1"/>
+  <!-- Lower palm and thumb shelf. -->
+  <path d="m30 288 41 44 21-11 26-51 24-11 4 27q7 34-8 61-17 28-43 43l-18-9-5-35-24-26Z" fill="url(#shell)" stroke="#1b2832" stroke-width="1.5"/>
+  <path d="m24 288 12 28 34 33 4 26-22-18-28-41-9-27Z" fill="#1a2730" stroke="#52616c" stroke-width=".8"/>
+  <path d="M140 294q3 47-37 78" fill="none" stroke="#8c9ba5" stroke-opacity=".3"/>
+  <path d="m114 299 13-11-4 21-14 12Z" fill="#101a23" stroke="#536572" stroke-opacity=".5"/>
+</svg>
